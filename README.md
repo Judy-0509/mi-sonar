@@ -4,7 +4,18 @@
 
 Claude Code / OpenCode에서 스마트폰 시장 데이터를 말로 물어보세요.
 
-## 설치 (PowerShell에 한 줄 붙여넣기)
+## 설치: 아래 상자를 복사해서 Claude Code 또는 OpenCode에 그대로 붙여넣으세요
+
+```text
+mi-sonar 스킬을 설치해줘. 순서:
+1) PowerShell에서 다음 한 줄을 실행: git clone __REPO_URL__ "$HOME\.claude\skills\mi-sonar"; powershell -ExecutionPolicy Bypass -File "$HOME\.claude\skills\mi-sonar\install.ps1"
+2) 끝나면 PowerShell로 [Environment]::GetEnvironmentVariable('MI_DB_SMARTPHONE','User') 와 ('MI_MINIO','User') 가 비어 있지 않은지만 확인해줘 (값은 절대 출력하지 말 것).
+3) 둘 다 설정됐으면 "설치 완료. 새 터미널을 열고 'mi-sonar 설치 확인해줘'라고 하세요"라고 알려주고, 아니면 설치 출력의 오류를 보여줘.
+```
+
+(GitHub에서 상자 오른쪽 위 복사 버튼을 누르면 됩니다. 직접 하려면 아래 한 줄만 PowerShell에 붙여넣어도 됩니다.)
+
+## 직접 설치 (PowerShell에 한 줄 붙여넣기)
 
 ```powershell
 git clone __REPO_URL__ "$HOME\.claude\skills\mi-sonar"; powershell -ExecutionPolicy Bypass -File "$HOME\.claude\skills\mi-sonar\install.ps1"

@@ -25,6 +25,7 @@ MI 그룹(Sales, System LSI) 비개발자 동료가 Claude Code 터미널에서 
 | 배포 | 사내 GitHub **비공개 저장소** (설치 스크립트에 공용 계정 정보 포함되므로 필수) |
 | 스킬 이름 | `mi-sonar` |
 | 조사기관 | 같은 항목을 여러 기관이 전망. 기관별 행 그대로 적재, 적재 시 키(기관명·기간·단위)만 통일. 기관 간 합산 금지 |
+| 기관 혼합 | 같은 기관 안에서만 숫자 가감(주기 변환 포함); 다른 기관은 비율만 적용; 추정값은 저장하지 않고 질문마다 계산; 혼합 계획을 사용자 확인 후 실행; 결과에 (추정)+계산식 표시 |
 
 ## 3. 폴더 구조
 
@@ -118,14 +119,15 @@ frontmatter `description`에 트리거 키워드: 스마트폰 시장 데이터,
 1. `query.py sources`로 소스 확인. 환경변수 미설정이면 설치 안내 후 중단.
 2. 해당 소스 md의 컬럼 의미를 읽고, 세션당 1회 `query.py schema`로 실제 컬럼 확인.
 3. 조사기관 확정: 지정 없으면 기관별 커버리지를 조회해 1개를 제안하고 사용자 확인 후 집계. 기관 간 합산 금지.
-4. **DB에서 집계**하는 SQL 작성. 원시 행을 통째로 가져오지 않는다.
-5. 결과 가공: 표는 그대로, 추세·YoY·차트는 결과를 pandas/matplotlib로 처리.
-6. 원본이 필요하면 키 컬럼 값으로 `query.py fetch minio <키>`.
-7. 답변에 사용한 SQL을 함께 보여준다 (동료가 재현·검증 가능).
+4. 기관 혼합: 기준 기관에 없는 항목은 같은 기관 주기 변환 또는 타 기관 비율로 추정. 계획을 보여주고 확인 후 계산.
+5. **DB에서 집계**하는 SQL 작성. 원시 행을 통째로 가져오지 않는다.
+6. 결과 가공: 표는 그대로, 추세·YoY·차트는 결과를 pandas/matplotlib로 처리.
+7. 원본이 필요하면 키 컬럼 값으로 `query.py fetch minio <키>`.
+8. 답변에 사용한 SQL을 함께 보여준다 (동료가 재현·검증 가능).
 
 ## 7. 설치 (`README.md` + `install.ps1`)
 
-README 최상단: 배너 이미지 → 바로 아래 복사 한 줄.
+README 최상단: 에이전트에게 붙여넣는 설치 지시문 코드블록(GitHub 복사 버튼용) → 그 아래 직접 설치 한 줄.
 
 ```powershell
 git clone https://<사내GitHub>/<org>/mi-sonar "$HOME\.claude\skills\mi-sonar"; powershell -ExecutionPolicy Bypass -File "$HOME\.claude\skills\mi-sonar\install.ps1"

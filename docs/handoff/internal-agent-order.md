@@ -40,6 +40,7 @@ Set both env vars in the current shell, then run these 4 read-only checks with
   for each column (ask the owner for any you cannot infer from the sample rows).
 - Replace `__KEY_COLUMN__` with the real column that holds the MinIO object key.
 - Adjust the example queries so column names match the real schema; run each one once.
+- In the column table, mark which columns hold the period granularity (weekly/monthly), region, model and period; the mixing rules in SKILL.md step 4 depend on them.
 
 ## 3b. Research-firm check
 - Run `python scripts/query.py sql smartphone "SELECT <firm column>, COUNT(*) FROM smartphone_market_data GROUP BY 1 ORDER BY 2 DESC"`.
@@ -67,6 +68,7 @@ python -m pytest scripts -q
   (OpenCode reads `~/.claude/skills` natively; there is no separate registration).
 - In that terminal ask Claude Code: "2026년 2분기 제조사별 점유율 보여줘". It must call
   `query.py sql` and answer with a table plus the SQL it used. Claude asks which research firm to use first (SKILL.md step 3); choose one, then expect a table plus the SQL, naming the firm.
+- Second prompt: ask "일본 월별 아이폰 판매량 보여줘" (assuming Japan is missing at monthly level for the chosen firm); Claude must show a mixing plan and wait for confirmation before computing. If Japan exists directly, note that in the report instead.
 
 ## 6. Report back
 Repo URL, commit hash, which step-4 commands passed, any column whose meaning is still unknown.
