@@ -1,6 +1,6 @@
 ---
 name: mi-sonar
-description: 스마트폰 시장 데이터(smartphone_market_data) 조회·집계·추세 분석과 MinIO 원본 파일 다운로드. "출하량", "점유율", "판매량", "성장률", "YoY", "모델별/분기별 수치", "제조사", "브랜드", "모델", "갤럭시", "아이폰", "분기", "조사기관", "market share", "shipments", "시장 데이터", "원본 파일", "mi-sonar 설치 확인" 같은 요청에 사용. 모든 DB 접근은 scripts/query.py 로만 한다.
+description: 스마트폰 시장 데이터(smartphone_market_data) 조회·집계·추세 분석과 MinIO 원본 파일 다운로드, 증권사 레포트(브로커 리서치) 검색·요약. "출하량", "점유율", "판매량", "성장률", "YoY", "모델별/분기별 수치", "제조사", "브랜드", "모델", "갤럭시", "아이폰", "분기", "조사기관", "market share", "shipments", "시장 데이터", "원본 파일", "mi-sonar 설치 확인", "증권사 레포트", "리포트", "애널리스트", "broker report" 같은 요청에 사용. 모든 DB 접근은 scripts/query.py 로만 한다.
 ---
 
 # mi-sonar
@@ -53,6 +53,15 @@ SQL은 큰따옴표로 감싸고, SQL 안의 문자열 리터럴은 작은따옴
    - 그리기 전에 `plt.rcParams['font.family']='Malgun Gothic'`, `plt.rcParams['axes.unicode_minus']=False` 를 설정한다.
 7. **원본 파일**: 행의 원본 키 컬럼 값으로 `fetch minio <키>`. 위치를 모르면 `ls minio <접두어>`.
 8. **답변에 SQL 포함**: 사용한 SQL을 코드블록으로 같이 보여준다(동료가 재현·검증 가능).
+
+## 증권사 레포트 찾기 (소스 `reports`)
+
+스마트폰 관련 증권사 레포트 1건 = 1행 (`sales_team.nasdaq_report_doc`). 컬럼과 예시 쿼리는 `sources/reports.md`.
+
+1. **좁히기**: `topics`, `keywords`, `summary`, `title` 을 질문의 한국어·영어 단어로 `ILIKE` 하고 증권사·기간으로 거른다. 이 단계에서는 `body` 를 SELECT 하지 않는다.
+2. **본문 위치**: 좁힌 `id` 안에서 `body ILIKE '%영어 단어%'`. 본문은 영어 원문이므로 질문 단어를 영어로 바꿔 찾는다.
+3. **읽기**: 필요한 레포트의 `body` 를 한 건씩 가져와 끝까지 읽고 한국어로 답한다. 본문에 없는 내용은 지어내지 않는다.
+4. **출처**: 근거마다 `(증권사, 발행일, 제목, [p.N])` 를 붙인다. `[p.N]` 은 본문 속 페이지 표시 그대로다.
 
 ## 제약 (스크립트가 강제함)
 
