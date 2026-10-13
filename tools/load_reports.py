@@ -14,6 +14,7 @@ import os
 import re
 import sys
 import unicodedata
+import zipfile
 from collections import Counter
 from datetime import date, datetime
 from pathlib import Path
@@ -248,9 +249,27 @@ def extract_one(pdf: Path, staging: Path, force: bool) -> str:
             f"cut={heading or '-'} phone={meta['smartphone_hits']} url={meta['url_count']} {pdf.name}")
 
 
+def unzip_to_inbox(zp: Path, staging: Path) -> Path:
+    """Unpack a .zip into staging/inbox/<zip stem>/ (overwriting); members escaping that folder are skipped."""
+    dest = staging / "inbox" / zp.stem
+    dest.mkdir(parents=True, exist_ok=True)
+    root = dest.resolve()
+    with zipfile.ZipFile(zp) as z:
+        for m in z.infolist():
+            target = (root / m.filename).resolve()
+            if root != target and root not in target.parents:
+                print(f"SKIP {m.filename} (path outside folder)")
+            elif not m.is_dir():
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(z.read(m))
+    return dest
+
+
 def cmd_extract(staging: Path, paths: list[Path], force: bool) -> int:
     pdfs: list[Path] = []
     for p in paths:
+        if p.suffix.lower() == ".zip" and p.is_file():
+            p = unzip_to_inbox(p, staging)
         pdfs += sorted(f for f in p.iterdir() if f.suffix.lower() in SOURCE_EXTS) if p.is_dir() else [p]
     failed = 0
     for pdf in pdfs:

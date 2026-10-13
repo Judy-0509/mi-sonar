@@ -47,7 +47,9 @@ python tools/load_reports.py status
 (`body` = pages kept before the disclosure tail, `phone` = smartphone word count, `url` = link count).
 Pasted TechInsights articles (`.md`, saved in `staging/inbox`) can go in the same call, e.g.
 `python tools/load_reports.py extract "D:\path\to\reports" staging/inbox`. Running it again skips files that are already
-extracted (matched by sha256, unless `--force`). Check the output:
+extracted (matched by sha256, unless `--force`).
+A `.zip` of new PDFs can be passed directly (`extract "D:\new_reports.zip"`); it is unpacked under `staging/inbox/`.
+Check the output:
 
 - `FAIL <file>: ValueError: 파일명 형식 불일치` → the name is not `DD-Mon-YYYY_HH-MM-SS-…`. Report it.
 - Firm, ticker or title in `status` is clearly wrong (misparsed name) → with the owner's OK rename the PDF to

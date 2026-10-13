@@ -241,6 +241,26 @@ def test_extract_text_article(tmp_path, capsys):
     assert "skip" in capsys.readouterr().out
 
 
+def test_extract_zip_of_articles(tmp_path, capsys):
+    import zipfile
+    zp = tmp_path / "new_reports.zip"
+    other = "07-Oct-2026_00-00-00-TechInsights-Watch_Q3_Note.md"
+    with zipfile.ZipFile(zp, "w") as z:
+        z.writestr(ART_NAME, ART_TEXT)
+        z.writestr(other, "# Watch Note\nSome text.\n")
+        z.writestr("../evil.md", "x")
+    st = tmp_path / "st"
+    assert lr.main(["--staging", str(st), "extract", str(zp)]) == 0
+    out = capsys.readouterr().out
+    assert "SKIP ../evil.md (path outside folder)" in out
+    assert not (tmp_path / "evil.md").exists() and not (st / "inbox" / "evil.md").exists()
+    assert (st / "inbox" / "new_reports" / ART_NAME).exists()
+    lr.main(["--staging", str(st), "status"])
+    assert "(전체 2," in capsys.readouterr().out
+    lr.main(["--staging", str(st), "extract", str(zp)])
+    assert capsys.readouterr().out.count("skip ") == 2
+
+
 def test_extract_text_without_heading_and_upper_ext(tmp_path):
     f = tmp_path / "07-Oct-2026_00-00-00-TechInsights-Watch_Note.TXT"
     f.write_text("Plain paragraph.\n", encoding="utf-8")
