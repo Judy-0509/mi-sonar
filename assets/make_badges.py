@@ -7,7 +7,7 @@ B = [  # (file, label, message, color, logo)
     ("postgres", "postgres", "read-only", "336791", "postgresql"),
     ("minio", "storage", "minio", "C72C48", "minio"),
     ("agent", "agent", "claude code · opencode", "D97757", ""),
-    ("tests", "tests", "48 passing", "4C1", ""),
+    ("tests", "tests", "148 passing", "4C1", ""),
 ]
 enc = lambda s: quote(s.replace("-", "--").replace("_", "__"), safe="")
 out = pathlib.Path(__file__).parent / "badges"
