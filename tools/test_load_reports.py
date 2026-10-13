@@ -208,3 +208,112 @@ def test_extract_without_any_pdf_library(pdf_dir, tmp_path, monkeypatch, capsys)
     monkeypatch.setitem(sys.modules, "pypdf", None)
     assert lr.main(["--staging", str(tmp_path / "st"), "extract", str(pdf_dir)]) == 2
     assert "requirements-dev.txt" in capsys.readouterr().err
+
+
+# ---------- triage / annotate / status ----------
+
+GOOD_TRIAGE = {"kind": "company_update", "relevance": "high", "reason": "아이폰 부품 수요 전망이 주제"}
+GOOD_ANNOTATE = {
+    "title": "Micron Technology: Mgmt Meeting, CY27 and CY28 Both Significantly Tight",
+    "analyst": "Jane Doe",
+    "summary_ko": ["HBM 수요가 2027년까지 공급을 웃돈다.", "모바일 DRAM 탑재량이 늘어난다.", "목표주가 상향."],
+    "summary_en": "Management sees tight memory supply through CY28.",
+    "keywords_ko": ["HBM", "모바일 DRAM"],
+    "keywords_en": ["HBM", "mobile DRAM", "LPDDR5X"],
+    "topics": ["메모리", "스마트폰"],
+    "key_numbers": "CY27 DRAM bit growth 18%",
+}
+META = {"id": "a1b2c3d4e5f6", "file_sha256": "a1b2c3d4e5f6" + "0" * 52, "source_path": "x.pdf",
+        "published_on": "2026-10-06", "ticker": "MU", "market": "USQ", "firm": "JPMorgan",
+        "title": "Micron Technology Mgmt Mtg", "pages": 13, "body_pages": 7, "cut_heading": None,
+        "chars": 100, "url_count": 0, "smartphone_hits": 4, "extractor": "pdfplumber",
+        "extracted_at": "2026-10-13T10:00:00", "loaded": {}}
+
+
+def test_validate_triage_ok_and_errors():
+    assert lr.validate_triage(GOOD_TRIAGE) == []
+    errs = lr.validate_triage({"kind": "news", "relevance": "hi", "reason": "a\nb", "load": "yes", "x": 1})
+    assert len(errs) == 5
+    assert lr.validate_triage([1]) == ["JSON 객체가 아닙니다"]
+
+
+@pytest.mark.parametrize("kind,relevance,load,expect", [
+    ("company_update", "high", None, True),
+    ("industry_deep_dive", "medium", None, True),
+    ("company_update", "low", None, False),
+    ("link_digest", "high", None, False),
+    ("link_digest", "high", True, True),
+    ("company_update", "high", False, False),
+])
+def test_decide(kind, relevance, load, expect):
+    t = {"kind": kind, "relevance": relevance, "reason": "r"}
+    if load is not None:
+        t["load"] = load
+    assert lr.decide(t) is expect
+
+
+def test_validate_annotate_ok_and_title_rule():
+    assert lr.validate_annotate(GOOD_ANNOTATE, META) == []
+    no_title = {k: v for k, v in GOOD_ANNOTATE.items() if k != "title"}
+    assert lr.validate_annotate(no_title, META) == []  # filename title is used
+    assert any("title" in e for e in lr.validate_annotate(no_title, {**META, "title": None}))
+
+
+@pytest.mark.parametrize("patch,word", [
+    ({"summary_ko": ["한 줄", "두 줄"]}, "summary_ko"),
+    ({"summary_en": ""}, "summary_en"),
+    ({"keywords_ko": [f"k{i}" for i in range(11)]}, "keywords_ko"),
+    ({"keywords_en": ["a, b"]}, "keywords_en"),
+    ({"topics": ["스마트폰", "반도체"]}, "topics"),
+    ({"topics": []}, "topics"),
+    ({"ticker": "X" * 21}, "ticker"),
+    ({"key_numbers": None}, "key_numbers"),
+    ({"summary": "x"}, "모르는 키"),
+])
+def test_validate_annotate_errors(patch, word):
+    errs = lr.validate_annotate({**GOOD_ANNOTATE, **patch}, META)
+    assert any(word in e for e in errs), errs
+
+
+def write_report(st: Path, rid: str, triage=None, annotate=None, **meta) -> Path:
+    d = st / rid
+    d.mkdir(parents=True)
+    lr.write_json(d / "meta.json", {**META, "id": rid, "file_sha256": rid + "0" * 52, **meta})
+    (d / "text.txt").write_text(f"[p.1]\nBody of {rid}.\n", encoding="utf-8")
+    if triage is not None:
+        (d / "triage.json").write_text(triage if isinstance(triage, str) else json.dumps(triage), encoding="utf-8")
+    if annotate is not None:
+        lr.write_json(d / "annotate.json", annotate)
+    return d
+
+
+@pytest.fixture
+def staging(tmp_path):
+    st = tmp_path / "staging"
+    write_report(st, "aaaaaaaaaaaa", GOOD_TRIAGE, GOOD_ANNOTATE)  # load, ready
+    write_report(st, "bbbbbbbbbbbb", {**GOOD_TRIAGE, "relevance": "low", "reason": "서버 전용"})  # skip
+    write_report(st, "cccccccccccc", {**GOOD_TRIAGE, "kind": "link_digest", "load": True})  # load (manual), no annotate
+    write_report(st, "dddddddddddd", "{not json")  # broken triage
+    write_report(st, "eeeeeeeeeeee", published_on="2026-01-01")  # untriaged
+    return st
+
+
+def test_status_lines(staging, capsys):
+    assert lr.main(["--staging", str(staging), "status"]) == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0].startswith("eeeeeeeeeeee 2026-01-01")  # sorted by date
+    by_id = {ln[:12]: ln for ln in lines}
+    assert "triage=ok decision=load annotate=ok loaded=-" in by_id["aaaaaaaaaaaa"]
+    assert "decision=skip annotate=n/a" in by_id["bbbbbbbbbbbb"]
+    assert "decision=load* annotate=-" in by_id["cccccccccccc"]
+    assert "triage=ERR" in by_id["dddddddddddd"]
+    assert any(ln.startswith("    ! triage.json: JSON 오류") for ln in lines)
+    assert lines[-1] == "(전체 5, 분류됨 3, 적재 대상 2, 주석 완료 1)"
+
+
+def test_triage_report(staging, capsys):
+    assert lr.main(["--staging", str(staging), "triage-report"]) == 0
+    md = (staging / "triage.md").read_text(encoding="utf-8")
+    assert "## 적재 (2)" in md and "## 제외 (1)" in md and "## 미분류·오류 (2)" in md
+    assert "서버 전용" in md and "적재 (수동)" in md and "triage.json 없음" in md
+    assert "적재 2" in capsys.readouterr().out

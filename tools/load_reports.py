@@ -239,6 +239,175 @@ def cmd_extract(staging: Path, paths: list[Path], force: bool) -> int:
     return 1 if failed else 0
 
 
+# ---------- triage / annotate files ----------
+
+KINDS = ("link_digest", "weekly_note", "company_update", "industry_deep_dive", "mgmt_meeting", "other")
+RELEVANCE = ("high", "medium", "low")
+TOPICS = ("스마트폰", "AP", "메모리", "카메라", "디스플레이", "모뎀", "파운드리", "OEM", "공급망", "거시")
+TRIAGE_KEYS = {"kind", "relevance", "reason", "load"}
+ANNOTATE_KEYS = {"title", "ticker", "analyst", "summary_ko", "summary_en", "keywords_ko", "keywords_en",
+                 "topics", "key_numbers"}
+
+
+def _line(v) -> bool:
+    return isinstance(v, str) and bool(v.strip()) and "\n" not in v
+
+
+def validate_triage(t) -> list[str]:
+    if not isinstance(t, dict):
+        return ["JSON 객체가 아닙니다"]
+    errs = [f"모르는 키: {k}" for k in sorted(set(t) - TRIAGE_KEYS)]
+    if t.get("kind") not in KINDS:
+        errs.append(f"kind 는 {', '.join(KINDS)} 중 하나")
+    if t.get("relevance") not in RELEVANCE:
+        errs.append(f"relevance 는 {', '.join(RELEVANCE)} 중 하나")
+    if not _line(t.get("reason")):
+        errs.append("reason 은 비어 있지 않은 한 줄")
+    if "load" in t and not isinstance(t["load"], bool):
+        errs.append("load 는 true 또는 false (사용자만 씀)")
+    return errs
+
+
+def decide(t: dict) -> bool:
+    """Load rule: relevance high/medium and not a link digest. A user-written `load` overrides it."""
+    if isinstance(t.get("load"), bool):
+        return t["load"]
+    return t["relevance"] in ("high", "medium") and t["kind"] != "link_digest"
+
+
+def _words(v) -> bool:
+    return isinstance(v, list) and 1 <= len(v) <= 10 and all(_line(x) and "," not in x for x in v)
+
+
+def validate_annotate(a, meta: dict) -> list[str]:
+    if not isinstance(a, dict):
+        return ["JSON 객체가 아닙니다"]
+    errs = [f"모르는 키: {k}" for k in sorted(set(a) - ANNOTATE_KEYS)]
+    title = a.get("title") or meta.get("title")
+    if not (_line(title) and len(title) <= 300):
+        errs.append("title 은 300자 이하 한 줄 (파일명에 제목이 없으면 필수)")
+    for key, limit in (("ticker", 20), ("analyst", 100)):
+        if key in a and not (_line(a[key]) and len(a[key]) <= limit):
+            errs.append(f"{key} 는 {limit}자 이하 한 줄 (모르면 키를 빼세요)")
+    ko = a.get("summary_ko")
+    if not (isinstance(ko, list) and len(ko) == 3 and all(_line(x) for x in ko)):
+        errs.append("summary_ko 는 한 줄짜리 한국어 문장 3개의 목록")
+    if not _line(a.get("summary_en")):
+        errs.append("summary_en 은 영어 한 줄")
+    for key in ("keywords_ko", "keywords_en"):
+        if not _words(a.get(key)):
+            errs.append(f"{key} 는 쉼표 없는 한 줄 단어 1~10개의 목록")
+    kws = [a.get("keywords_ko"), a.get("keywords_en")]
+    if all(_words(k) for k in kws) and len(", ".join(kws[0] + kws[1])) > 500:
+        errs.append("keywords_ko + keywords_en 합계가 500자를 넘습니다")
+    topics = a.get("topics")
+    if not (isinstance(topics, list) and topics and len(set(topics)) == len(topics)
+            and all(x in TOPICS for x in topics)):
+        errs.append(f"topics 는 다음 중 1개 이상 (중복 없이): {', '.join(TOPICS)}")
+    if not isinstance(a.get("key_numbers"), str):
+        errs.append("key_numbers 는 문자열 (숫자가 없으면 빈 문자열)")
+    return errs
+
+
+def report_state(d: Path) -> dict:
+    """Everything known about one staging/<id>/ folder; JSON errors become validation errors."""
+    s = {"id": d.name, "dir": d, "meta": read_json(d / "meta.json"), "triage": None, "t_err": [],
+         "load": None, "annotate": None, "a_err": []}
+    try:
+        s["triage"] = read_json(d / "triage.json")
+    except ValueError as e:
+        s["t_err"] = [f"JSON 오류: {e}"]
+    if s["triage"] is not None:
+        s["t_err"] = validate_triage(s["triage"])
+        if not s["t_err"]:
+            s["load"] = decide(s["triage"])
+    if s["load"]:
+        try:
+            s["annotate"] = read_json(d / "annotate.json")
+        except ValueError as e:
+            s["a_err"] = [f"JSON 오류: {e}"]
+        if s["annotate"] is not None:
+            s["a_err"] = validate_annotate(s["annotate"], s["meta"])
+    return s
+
+
+def all_states(staging: Path) -> list[dict]:
+    dirs = [d for d in staging.iterdir() if (d / "meta.json").exists()] if staging.exists() else []
+    return sorted((report_state(d) for d in dirs),
+                  key=lambda s: (s["meta"]["published_on"], s["meta"]["firm"], s["id"]))
+
+
+def _stage(obj, errs: list[str]) -> str:
+    return "ERR" if errs else ("-" if obj is None else "ok")
+
+
+def cmd_status(staging: Path) -> int:
+    states = all_states(staging)
+    for s in states:
+        m = s["meta"]
+        decision = "-"
+        if s["load"] is not None:
+            decision = ("load" if s["load"] else "skip") + ("*" if "load" in s["triage"] else "")
+        annotate = _stage(s["annotate"], s["a_err"]) if s["load"] else "n/a"
+        loaded = ",".join(m.get("loaded", {})) or "-"
+        print(f"{s['id']} {m['published_on']} {m['firm']:<12} triage={_stage(s['triage'], s['t_err'])} "
+              f"decision={decision} annotate={annotate} loaded={loaded}  {m['title'] or '(제목 없음)'}")
+        for e in s["t_err"]:
+            print(f"    ! triage.json: {e}")
+        for e in s["a_err"]:
+            print(f"    ! annotate.json: {e}")
+    todo = [s for s in states if s["load"]]
+    ready = [s for s in todo if s["annotate"] is not None and not s["a_err"]]
+    print(f"(전체 {len(states)}, 분류됨 {sum(s['load'] is not None for s in states)}, "
+          f"적재 대상 {len(todo)}, 주석 완료 {len(ready)})")
+    return 0
+
+
+def _cell(v) -> str:
+    return "" if v is None else str(v).replace("\r", " ").replace("\n", " ").replace("|", "\\|")
+
+
+def md_table(cols: list[str], rows: list[tuple]) -> list[str]:
+    if not rows:
+        return ["(없음)"]
+    return ["| " + " | ".join(cols) + " |", "|" + " --- |" * len(cols),
+            *("| " + " | ".join(_cell(v) for v in r) + " |" for r in rows)]
+
+
+def cmd_triage_report(staging: Path) -> int:
+    states = all_states(staging)
+    groups: dict[str, list[dict]] = {"load": [], "skip": [], "todo": []}
+    for s in states:
+        groups["todo" if s["load"] is None else ("load" if s["load"] else "skip")].append(s)
+    n = {k: len(v) for k, v in groups.items()}
+    lines = [
+        "# 레포트 분류 결과 (triage)",
+        "",
+        f"생성: {datetime.now():%Y-%m-%d %H:%M} / 전체 {len(states)}건: 적재 {n['load']}, 제외 {n['skip']}, "
+        f"미분류·오류 {n['todo']}",
+        "",
+        "규칙: relevance 가 high 또는 medium 이고 kind 가 link_digest 가 아니면 적재합니다.",
+        "결정을 바꾸려면 `staging/<id>/triage.json` 에 `\"load\": true` 또는 `\"load\": false` 를 넣고 "
+        "`triage-report` 를 다시 실행하세요 (결정 칸에 `(수동)` 표시).",
+        "제외된 레포트는 DB와 MinIO 어디에도 올라가지 않고 이 파일에만 기록됩니다.",
+    ]
+    cols = ["id", "발행일", "증권사", "티커", "제목", "종류", "관련도", "결정", "이유", "폰 단어/URL"]
+    for key, label in (("load", "적재"), ("skip", "제외")):
+        rows = [(s["id"], s["meta"]["published_on"], s["meta"]["firm"], s["meta"]["ticker"], s["meta"]["title"],
+                 s["triage"]["kind"], s["triage"]["relevance"], label + (" (수동)" if "load" in s["triage"] else ""),
+                 s["triage"]["reason"], f"{s['meta']['smartphone_hits']}/{s['meta']['url_count']}")
+                for s in groups[key]]
+        lines += ["", f"## {label} ({len(rows)})", "", *md_table(cols, rows)]
+    rows = [(s["id"], s["meta"]["published_on"], s["meta"]["firm"], s["meta"]["title"],
+             "; ".join(s["t_err"]) or "triage.json 없음") for s in groups["todo"]]
+    lines += ["", f"## 미분류·오류 ({len(rows)})", "", *md_table(["id", "발행일", "증권사", "제목", "문제"], rows)]
+    staging.mkdir(parents=True, exist_ok=True)
+    out = staging / "triage.md"
+    out.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    print(f"저장: {out} (적재 {n['load']}, 제외 {n['skip']}, 미분류·오류 {n['todo']})")
+    return 0
+
+
 # ---------- CLI ----------
 
 def main(argv: list[str] | None = None) -> int:
@@ -253,8 +422,14 @@ def main(argv: list[str] | None = None) -> int:
     s = sub.add_parser("extract", help="PDF -> staging/<id>/text.txt + meta.json")
     s.add_argument("paths", nargs="+", type=Path, help="PDF 파일 또는 PDF가 든 폴더")
     s.add_argument("--force", action="store_true", help="이미 추출된 것도 다시 추출")
+    sub.add_parser("status", help="레포트별 단계 상태 한 줄씩")
+    sub.add_parser("triage-report", help="staging/triage.md 생성")
     a = p.parse_args(argv)
     try:
+        if a.cmd == "status":
+            return cmd_status(a.staging)
+        if a.cmd == "triage-report":
+            return cmd_triage_report(a.staging)
         return cmd_extract(a.staging, a.paths, a.force)
     except LoaderError as e:
         print(f"[load_reports] {e}", file=sys.stderr)
