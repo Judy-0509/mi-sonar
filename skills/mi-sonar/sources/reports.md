@@ -25,9 +25,11 @@ summary: 증권사 레포트 (스마트폰 관련만, 요약·키워드·영문 
 | pages | PDF 전체 쪽수 | |
 | minio_key | 원본 PDF의 MinIO 키 | `fetch minio <키>` 는 `MI_MINIO` 가 같은 버킷을 가리킬 때만 된다 |
 | file_sha256 | PDF 지문 | 중복 방지용. 조회에 쓸 일 없음 |
-| summary | 요약: 한국어 3줄 + 영어 1줄 | |
+| summary | 요약: 한국어 3~6줄 + 영어 1줄 | 한국어 1번째 줄은 주장, 2번째 줄부터는 `[p.N]` 이 붙은 근거. 훑어보기용이며 검색은 `body` 로 |
 | keywords | 키워드: 한국어 + 영어, 쉼표로 이은 문자열 | |
 | key_numbers | 핵심 숫자 메모 (자유 서술) | 출처 페이지 `[p.N]` 이 붙어 있을 수 있다 |
+| thesis | 레포트의 주장 한 문장 (한국어) | "새 레포트 주장 목록" 을 뽑을 때 쓴다 |
+| scope | 레포트가 무엇에 대한 것인지, 쉼표로 이은 문자열 | `market`(시장 전반), `vendor:<업체명>`(그 업체가 주제), `band:high`/`band:mid`/`band:low`(가격대). 언급만 된 업체는 들어가지 않는다 |
 | body | 본문 (영어 원문, `[p.N]` 표시) | 길다. 목록 조회에 넣지 않는다 |
 | body_loaded | 본문 적재 여부 | 지금은 모두 true |
 | loaded_at | 적재 시각 | |
@@ -60,7 +62,15 @@ ORDER BY published_on DESC LIMIT 2
 -- 4) 한 건의 본문 전체 읽기
 SELECT firm, published_on, title, body
 FROM sales_team.nasdaq_report_doc WHERE id = 7;
+
+-- 5) 이번 주 새 레포트 주장 목록
+SELECT published_on, firm, thesis, scope FROM sales_team.nasdaq_report_doc WHERE loaded_at >= CURRENT_DATE - 7 ORDER BY published_on DESC
+
+-- 6) Apple 이 주제인 레포트 (Apple 이 언급만 된 레포트는 제외)
+SELECT id, published_on, firm, title, thesis FROM sales_team.nasdaq_report_doc WHERE scope LIKE '%vendor:Apple%' ORDER BY published_on DESC
 ```
+
+문단 검색은 `WHERE body ILIKE '%foldable%'` 로 한다 (2번 쿼리). 찾은 문단 앞의 `[p.N]` 이 출처 쪽이다.
 
 ## 주의사항
 

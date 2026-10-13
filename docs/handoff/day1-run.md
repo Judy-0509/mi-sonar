@@ -38,7 +38,7 @@ python "<레포 경로>\skills\mi-sonar\scripts\query.py" schema smartphone
 ```
 - 출력의 컬럼명·타입·comment 로 `skills/mi-sonar/sources/smartphone.md` 의 컬럼 표를 채운다 (값·샘플 행은 적지 않는다).
 - comment 가 없어 의미가 불명확한 컬럼은 한 번에 모아 객관식으로 묻는다: 컬럼마다 추정 의미 A/B/C + D 기타. (멈춤)
-- 보고: 채운 컬럼 수, 질문한 컬럼 수. 사용자가 OK 하면 커밋 (`sources/smartphone: fill column table`).
+- 보고: 채운 컬럼 수, 질문한 컬럼 수, `smartphone_market_data` 에 (a) 적재 시각 또는 발행월 컬럼과 (b) 가격대 컬럼이 있는지 (있으면 컬럼명, 없으면 "없음"). 사용자가 OK 하면 커밋 (`sources/smartphone: fill column table`).
 
 ## STEP 2. TechInsights 기사 받기 (사용자가 붙여넣는 경우만)
 - 사용자가 기사 본문을 붙여넣고 "적재해줘" 라고 하면 `docs/handoff/smartwatch-data.md` 2절대로 `staging/inbox/` 에 `.md` 로 저장한다. 제목·발행일이 없으면 객관식(예: 본문 첫 문장을 제목으로 / 오늘 날짜 / 직접 입력)으로 묻는다.
@@ -60,7 +60,8 @@ python tools\load_reports.py status
 - 멈춤: "triage.md 를 열어 확인 후 A. 그대로 진행 / B. 바꿀 항목 알려줌(제목 + load true/false) / C. 전부 다시 분류 / D. 기타" 로 묻는다.
 
 ## STEP 5. 요약·주석 (annotate) + 로컬 적재
-- 적재 대상만 `annotate.json` 작성 (요약 한/영 3줄, 키워드 한/영 ≤10, topics 는 정해진 목록에서, key_numbers 는 `[p.N]` 과 함께). TechInsights 기사는 `firm_analysis` 규칙(업체·국가명 전부 keywords_en 에).
+- 적재 대상만 `annotate.json` 작성 (요약 한국어 3~6줄(2번째 줄부터 `[p.N]`) + 영어 1줄, 키워드 한/영 ≤10, topics 는 정해진 목록에서, key_numbers 는 `[p.N]` 과 함께). TechInsights 기사는 `firm_analysis` 규칙(업체·국가명 전부 keywords_en 에).
+- annotate 는 이제 `thesis`(주장 한 문장)와 `scope`(market / vendor:<업체> / band:<high|mid|low>)가 필수다. 규칙은 [reports-loader-run.md 3절](reports-loader-run.md#3-annotate-decisionload-only).
 ```powershell
 python tools\load_reports.py status
 python tools\load_reports.py load --local

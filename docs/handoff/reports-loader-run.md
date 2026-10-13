@@ -103,10 +103,13 @@ For each report whose `status` line says `decision=load` (or `load*`), read the 
 {
   "title": "Micron Technology: Mgmt Meeting - CY27 and CY28 Both Significantly Tight",
   "analyst": "Jane Doe",
+  "thesis": "AI 서버 HBM과 스마트폰 LPDDR5X 수요로 메모리 공급 부족이 2028년까지 이어진다.",
+  "scope": ["vendor:Micron"],
   "summary_ko": [
     "경영진은 2027~2028년 메모리 공급이 크게 부족할 것으로 본다.",
-    "AI 서버용 HBM과 함께 스마트폰 LPDDR5X 탑재량 증가가 수요를 받친다.",
-    "증권사는 비중확대 의견과 상향된 목표주가를 유지했다."
+    "2027년 DRAM 비트 수요는 전년 대비 18% 늘어난다 [p.2].",
+    "스마트폰 평균 DRAM 탑재량이 2027년 9.5GB로 늘어 수요를 받친다 [p.3].",
+    "증권사는 비중확대 의견과 상향된 목표주가를 유지했다 [p.1]."
   ],
   "summary_en": "Management expects memory supply to stay significantly tight through CY28, helped by rising smartphone LPDDR5X content.",
   "keywords_ko": ["HBM", "모바일 DRAM", "공급 부족", "목표주가"],
@@ -121,11 +124,22 @@ For each report whose `status` line says `decision=load` (or `load*`), read the 
 | `title` | Required when the filename has no title (`status` shows `(제목 없음)`). Also write it when the filename title is cut off: copy the full title from page 1. One line, ≤ 300 characters. |
 | `ticker` | Only if the filename had none and the report is about one listed company. ≤ 20 characters. Otherwise leave the key out. |
 | `analyst` | Lead analyst if the name is visible. ≤ 100 characters. Otherwise leave the key out. |
-| `summary_ko` | Exactly 3 strings, each one Korean sentence on one line. |
+| `thesis` | Required. The report's own claim in one Korean sentence on one line, 10 to 300 characters. Not a topic label. |
+| `scope` | Required. 1 to 6 strings saying what the report is about (see the scope rule below). |
+| `summary_ko` | 3 to 6 strings, each one Korean sentence on one line. Line 1 restates the thesis or the main claim. Lines 2 and after are supporting points and each contains its `[p.N]`. |
 | `summary_en` | One English sentence on one line. |
 | `keywords_ko`, `keywords_en` | 1 to 10 each. No commas inside a keyword. Company, product and technology names people would search for. |
 | `topics` | 1 or more, no duplicates, only from: `스마트폰, AP, 메모리, 카메라, 디스플레이, 모뎀, 파운드리, OEM, 공급망, 거시, 스마트워치`. |
 | `key_numbers` | The key figures, copied exactly with unit and period, each followed by its `[p.N]`. `""` if the report has none. |
+
+Scope rule (each value exactly one of these forms; a report may have several):
+
+- `market` = 시장 전반: the smartphone / smartwatch market as a whole is the subject.
+- `vendor:<Name>` = 특정 업체가 주제: that company is the subject, not just mentioned (e.g. `vendor:Apple`). Free text, no commas.
+- `band:<high|mid|low>` = 특정 가격대: a specific price band is the subject. Default cut-offs: high ≥ $600, mid $200–599,
+  low < $200 (the owner may change them).
+
+Example: a premium-phone market report centred on Apple → `["market", "vendor:Apple", "band:high"]`.
 
 For `kind` = `firm_analysis`: `keywords_en` MUST include every vendor name and every country / region named in the article (for example `Apple, Huawei, China, India`) and `keywords_ko` their Korean forms; `key_numbers` quotes every shipment and growth figure verbatim with `[p.1]`.
 
