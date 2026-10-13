@@ -131,8 +131,11 @@ powershell -ExecutionPolicy Bypass -c "irm https://<사내GitHub>/<org>/mi-sonar
 1. `git clone` 또는 이미 있으면 `git pull` → `~/.claude/skills/mi-sonar`
    (git 없으면 zip 다운로드로 대체)
 2. `pip install -r requirements.txt`
-3. `setx MI_DB_SMARTPHONE "..."`, `setx MI_MINIO "..."` (값은 스크립트에 내장)
-4. "새 터미널을 열고 Claude에게 `mi-sonar 설치 확인해줘`라고 하세요" 출력
+3. `setx MI_DB_SMARTPHONE "..."`, `setx MI_MINIO "..."` (값은 스크립트에 내장).
+   사용자 수준 환경변수이므로 Claude Code와 OpenCode 모두 새 터미널에서 자동으로 읽는다.
+4. OpenCode 전역 스킬 폴더 `~/.config/opencode/skill/mi-sonar`에 정션(junction)을 만들어
+   같은 폴더가 양쪽 도구에 등록되게 한다.
+5. "새 터미널을 열고 Claude 또는 OpenCode에게 `mi-sonar 설치 확인해줘`라고 하세요" 출력
 
 README 나머지: 사용 예시 질문 5개, 문제 해결 3줄(환경변수 안 잡힘 → 터미널 재시작 등).
 
@@ -153,8 +156,14 @@ README 나머지: 사용 예시 질문 5개, 문제 해결 3줄(환경변수 안
 - 내부 주간보고: 동일 패턴
 - 사람별 계정, API 서버, MCP 전환: 공용 계정 정책이 바뀔 때
 
-## 11. 구현 전 소유자가 채워야 할 것
+## 11. 작업 분할: 사외(지금) vs 사내 에이전트
 
-- 사내 GitHub 저장소 URL
-- DB 접속 문자열, MinIO 접속 정보 (install.ps1에 삽입)
-- `sources/smartphone.md`의 컬럼 의미와 원본 키 컬럼 이름
+사내망·실제 DB·사내 GitHub가 필요한 일은 **사내 에이전트에게 작업지시서로 위임**한다.
+저장소 루트 = 스킬 루트 (clone 하면 바로 `~/.claude/skills/mi-sonar`).
+
+| 사외에서 지금 | 사내 에이전트 (`docs/handoff/internal-agent-order.md`) |
+|---|---|
+| query.py, 테스트, SKILL.md, sources 뼈대, README, 배너, install.ps1(자리표시자) | install.ps1의 저장소 URL·DB·MinIO 접속 정보 채우기 |
+| | `query.py schema smartphone` 실행 → `sources/smartphone.md` 컬럼 표 채우기, 원본 키 컬럼명 기입 |
+| | 사내 GitHub 비공개 저장소에 push, 깨끗한 PC에서 설치 한 줄 검증 |
+| | 실제 DB로 `sources → schema → sql → ls → fetch` 통합 점검 |
