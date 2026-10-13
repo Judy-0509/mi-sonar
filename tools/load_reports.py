@@ -60,13 +60,13 @@ def redact(text: str, conn: str | None) -> str:
 
 # ---------- file identity ----------
 
-NAME_RE = re.compile(r"^(\d{2})-([A-Za-z]{3})-(\d{4})_\d{2}-\d{2}-\d{2}-(.+)\.pdf$", re.I)
+NAME_RE = re.compile(r"^(\d{2})-([A-Za-z]{3})-(\d{4})_\d{2}-\d{2}-\d{2}-(.+)\.(?:pdf|md|txt)$", re.I)
 TICKER_RE = re.compile(r"^[A-Z0-9.]{1,10}$")
 MARKET_RE = re.compile(r"^[A-Z]{1,4}$")
 
 
 def parse_filename(name: str) -> dict:
-    """`DD-Mon-YYYY_HH-MM-SS-[TICKER-MARKET-]FIRM[-TITLE].pdf` -> published_on, ticker, market, firm, title."""
+    """`DD-Mon-YYYY_HH-MM-SS-[TICKER-MARKET-]FIRM[-TITLE].pdf|md|txt` -> published_on, ticker, market, firm, title."""
     m = NAME_RE.match(name)
     if not m or m.group(2).lower() not in MONTHS:
         raise ValueError(f"파일명 형식 불일치: {name}")
@@ -153,11 +153,11 @@ def join_wraps(text: str) -> str:
     return "\n".join(paras)
 
 
-def render_body(pages: list[str]) -> str:
+def render_body(pages: list[str], page_numbers: bool = True) -> str:
     """Cleaned pages -> one text with a `[p.N]` line before each non-empty page (N = PDF page number)."""
     out = []
     for n, page in enumerate(pages, 1):
-        text = join_wraps(strip_page_numbers(unicodedata.normalize("NFKC", page)))  # NFKC: ligatures like ﬁ -> fi
+        text = join_wraps((strip_page_numbers if page_numbers else str)(unicodedata.normalize("NFKC", page)))  # NFKC: ligatures like ﬁ -> fi
         if text:
             out.append(f"[p.{n}]\n{text}")
     return "\n".join(out) + "\n" if out else ""
@@ -198,6 +198,21 @@ def read_pages(pdf: Path) -> tuple[list[str], str]:
     return [p.extract_text() or "" for p in PdfReader(pdf).pages], "pypdf"
 
 
+TEXT_EXTS = (".md", ".txt")
+SOURCE_EXTS = (".pdf",) + TEXT_EXTS
+CONTENT_TYPES = {".pdf": "application/pdf", ".md": "text/markdown", ".txt": "text/plain"}
+
+
+def read_text_source(path: Path, info: dict) -> tuple[list[str], str]:
+    """Pasted article (.md/.txt): the whole file is page 1. A first line `# Title` overrides the filename title."""
+    text = path.read_text(encoding="utf-8-sig")
+    lines = text.splitlines()
+    if lines and lines[0].startswith("# "):
+        info["title"] = " ".join(lines[0][2:].split()) or info["title"]
+        text = "\n".join(lines[1:])
+    return [text], "text"
+
+
 def extract_one(pdf: Path, staging: Path, force: bool) -> str:
     info = parse_filename(pdf.name)
     sha = file_sha256(pdf)
@@ -206,10 +221,11 @@ def extract_one(pdf: Path, staging: Path, force: bool) -> str:
     old = read_json(d / "meta.json")
     if old and not force:
         return f"skip {rid} (이미 추출됨) {pdf.name}"
-    raw, extractor = read_pages(pdf)
+    is_text = pdf.suffix.lower() in TEXT_EXTS
+    raw, extractor = read_text_source(pdf, info) if is_text else read_pages(pdf)
     raw = [unicodedata.normalize("NFKC", p) for p in raw]  # before the cut: ligatures/NBSP would defeat CUT_RE
-    pages, heading = cut_disclosure(strip_repeated_lines(raw))
-    body = render_body(pages)
+    pages, heading = (raw, None) if is_text else cut_disclosure(strip_repeated_lines(raw))  # articles: no cleanup
+    body = render_body(pages, not is_text)  # articles keep lone-number lines
     meta = {
         "id": rid,
         "file_sha256": sha,
@@ -235,7 +251,7 @@ def extract_one(pdf: Path, staging: Path, force: bool) -> str:
 def cmd_extract(staging: Path, paths: list[Path], force: bool) -> int:
     pdfs: list[Path] = []
     for p in paths:
-        pdfs += sorted(f for f in p.iterdir() if f.suffix.lower() == ".pdf") if p.is_dir() else [p]
+        pdfs += sorted(f for f in p.iterdir() if f.suffix.lower() in SOURCE_EXTS) if p.is_dir() else [p]
     failed = 0
     for pdf in pdfs:
         try:
@@ -245,15 +261,16 @@ def cmd_extract(staging: Path, paths: list[Path], force: bool) -> int:
         except Exception as e:  # one bad PDF must not stop the batch
             failed += 1
             print(f"FAIL {pdf.name}: {type(e).__name__}: {e}")
-    print(f"(PDF {len(pdfs)}개, 실패 {failed}개)")
+    print(f"(파일 {len(pdfs)}개, 실패 {failed}개)")
     return 1 if failed else 0
 
 
 # ---------- triage / annotate files ----------
 
-KINDS = ("link_digest", "weekly_note", "company_update", "industry_deep_dive", "mgmt_meeting", "other")
+KINDS = ("link_digest", "weekly_note", "company_update", "industry_deep_dive", "mgmt_meeting", "firm_analysis",
+         "other")
 RELEVANCE = ("high", "medium", "low")
-TOPICS = ("스마트폰", "AP", "메모리", "카메라", "디스플레이", "모뎀", "파운드리", "OEM", "공급망", "거시")
+TOPICS = ("스마트폰", "AP", "메모리", "카메라", "디스플레이", "모뎀", "파운드리", "OEM", "공급망", "거시", "스마트워치")
 TRIAGE_KEYS = {"kind", "relevance", "reason", "load"}
 ANNOTATE_KEYS = {"title", "ticker", "analyst", "summary_ko", "summary_en", "keywords_ko", "keywords_en",
                  "topics", "key_numbers"}
@@ -464,7 +481,7 @@ def build_row(meta: dict, triage: dict, ann: dict, body: str) -> dict:
         "topics": ", ".join(ann["topics"]),
         "analyst": ann.get("analyst"),
         "pages": meta["pages"],
-        "minio_key": f"reports/{slug(meta['firm'])}/{name}.pdf",
+        "minio_key": f"reports/{slug(meta['firm'])}/{name}{Path(meta['source_path']).suffix.lower()}",
         "file_sha256": meta["file_sha256"],
         "summary": "\n".join(ann["summary_ko"]) + "\n" + ann["summary_en"],
         "keywords": ", ".join(ann["keywords_ko"] + ann["keywords_en"]),
@@ -520,7 +537,7 @@ def load_all(staging: Path, dsn: str, target: str, create: bool, minio_url: str)
                     else:
                         conn.execute(INSERT, row)  # INSERT first: an upload failure raises and rolls the row back
                         if mc:
-                            mc[0].fput_object(mc[1], row["minio_key"], m["source_path"], content_type="application/pdf")
+                            mc[0].fput_object(mc[1], row["minio_key"], m["source_path"], content_type=CONTENT_TYPES[Path(row["minio_key"]).suffix])
                         result = "loaded"
             except Exception as e:  # report the failure, keep going with the next report
                 counts["fail"] += 1
@@ -571,8 +588,8 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="load_reports.py", description=__doc__)
     p.add_argument("--staging", type=Path, default=STAGING, help="작업 폴더 (기본: 저장소의 staging/)")
     sub = p.add_subparsers(dest="cmd", required=True)
-    s = sub.add_parser("extract", help="PDF -> staging/<id>/text.txt + meta.json")
-    s.add_argument("paths", nargs="+", type=Path, help="PDF 파일 또는 PDF가 든 폴더")
+    s = sub.add_parser("extract", help="PDF/.md/.txt -> staging/<id>/text.txt + meta.json")
+    s.add_argument("paths", nargs="+", type=Path, help="PDF·.md·.txt 파일 또는 그것들이 든 폴더")
     s.add_argument("--force", action="store_true", help="이미 추출된 것도 다시 추출")
     sub.add_parser("status", help="레포트별 단계 상태 한 줄씩")
     sub.add_parser("triage-report", help="staging/triage.md 생성")

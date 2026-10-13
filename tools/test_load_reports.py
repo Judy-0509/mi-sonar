@@ -162,7 +162,7 @@ def pdf_dir(tmp_path):
     d = tmp_path / "pdfs"
     d.mkdir()
     make_pdf(d / PDF_NAME, PDF_PAGES)
-    (d / "notes.txt").write_text("not a pdf", encoding="utf-8")
+    (d / "notes.docx").write_text("not a pdf", encoding="utf-8")
     return d
 
 
@@ -190,7 +190,7 @@ def test_extract_writes_staging_and_is_idempotent(pdf_dir, tmp_path, extractor, 
     )
     assert not (d / "source.pdf").exists()
     out = capsys.readouterr().out
-    assert "ok" in out and "notes.txt" not in out
+    assert "ok" in out and "notes.docx" not in out
     assert lr.main(["--staging", str(st), "extract", str(pdf_dir / PDF_NAME)]) == 0
     assert "skip" in capsys.readouterr().out
 
@@ -208,6 +208,58 @@ def test_extract_without_any_pdf_library(pdf_dir, tmp_path, monkeypatch, capsys)
     monkeypatch.setitem(sys.modules, "pypdf", None)
     assert lr.main(["--staging", str(tmp_path / "st"), "extract", str(pdf_dir)]) == 2
     assert "requirements-dev.txt" in capsys.readouterr().err
+
+
+# ---------- text articles (.md / .txt) ----------
+
+ART_NAME = "06-Oct-2026_00-00-00-TechInsights-Smartwatch_Q3_Analysis.md"
+ART_TEXT = ("\ufeff# Smartwatch Q3 2026: Apple regains share\nApple shipped 12.3m units in\nQ3, up 8% YoY.\n\n"
+            "2026\nHuawei grew in China.\n")
+
+
+def test_parse_filename_article():
+    assert lr.parse_filename(ART_NAME) == {
+        "published_on": "2026-10-06", "ticker": None, "market": None, "firm": "TechInsights",
+        "title": "Smartwatch Q3 Analysis"}
+
+
+def test_extract_text_article(tmp_path, capsys):
+    src = tmp_path / "in"
+    src.mkdir()
+    (src / ART_NAME).write_bytes(ART_TEXT.encode("utf-8"))
+    st = tmp_path / "st"
+    assert lr.main(["--staging", str(st), "extract", str(src / ART_NAME)]) == 0
+    d = st / hashlib.sha256((src / ART_NAME).read_bytes()).hexdigest()[:12]
+    meta = json.loads((d / "meta.json").read_text(encoding="utf-8"))
+    assert meta["title"] == "Smartwatch Q3 2026: Apple regains share"  # `# ` line beats the filename title
+    assert (meta["firm"], meta["pages"], meta["body_pages"], meta["extractor"], meta["cut_heading"]) == (
+        "TechInsights", 1, 1, "text", None)
+    assert (d / "text.txt").read_text(encoding="utf-8") == (
+        "[p.1]\nApple shipped 12.3m units in Q3, up 8% YoY.\n2026 Huawei grew in China.\n")
+    capsys.readouterr()
+    assert lr.main(["--staging", str(st), "extract", str(src / ART_NAME)]) == 0
+    assert "skip" in capsys.readouterr().out
+
+
+def test_extract_text_without_heading_and_upper_ext(tmp_path):
+    f = tmp_path / "07-Oct-2026_00-00-00-TechInsights-Watch_Note.TXT"
+    f.write_text("Plain paragraph.\n", encoding="utf-8")
+    st = tmp_path / "st"
+    assert lr.main(["--staging", str(st), "extract", str(f)]) == 0
+    meta = json.loads(next(st.glob("*/meta.json")).read_text(encoding="utf-8"))
+    assert meta["title"] == "Watch Note" and meta["extractor"] == "text"
+
+
+def test_extract_mixed_folder_and_minio_extension(pdf_dir, tmp_path, capsys):
+    pytest.importorskip("pypdf")
+    (pdf_dir / ART_NAME).write_text(ART_TEXT, encoding="utf-8")
+    st = tmp_path / "st"
+    assert lr.main(["--staging", str(st), "extract", str(pdf_dir)]) == 0
+    assert len(list(st.glob("*/meta.json"))) == 2
+    assert "(파일 2개" in capsys.readouterr().out
+    meta = next(m for m in (json.loads(f.read_text(encoding="utf-8")) for f in st.glob("*/meta.json"))
+                if m["extractor"] == "text")
+    assert lr.build_row(meta, {**GOOD_TRIAGE, "kind": "firm_analysis"}, GOOD_ANNOTATE, "b")["minio_key"].endswith(".md")
 
 
 # ---------- triage / annotate / status ----------
@@ -244,6 +296,8 @@ def test_validate_triage_ok_and_errors():
     ("link_digest", "high", None, False),
     ("link_digest", "high", True, True),
     ("company_update", "high", False, False),
+    ("firm_analysis", "high", None, True),
+    ("firm_analysis", "low", None, False),
 ])
 def test_decide(kind, relevance, load, expect):
     t = {"kind": kind, "relevance": relevance, "reason": "r"}
@@ -254,6 +308,8 @@ def test_decide(kind, relevance, load, expect):
 
 def test_validate_annotate_ok_and_title_rule():
     assert lr.validate_annotate(GOOD_ANNOTATE, META) == []
+    assert lr.validate_annotate({**GOOD_ANNOTATE, "topics": ["스마트워치"]}, META) == []
+    assert lr.validate_triage({**GOOD_TRIAGE, "kind": "firm_analysis"}) == []
     no_title = {k: v for k, v in GOOD_ANNOTATE.items() if k != "title"}
     assert lr.validate_annotate(no_title, META) == []  # filename title is used
     assert any("title" in e for e in lr.validate_annotate(no_title, {**META, "title": None}))
