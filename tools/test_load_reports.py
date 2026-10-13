@@ -268,7 +268,10 @@ GOOD_TRIAGE = {"kind": "company_update", "relevance": "high", "reason": "아이�
 GOOD_ANNOTATE = {
     "title": "Micron Technology: Mgmt Meeting, CY27 and CY28 Both Significantly Tight",
     "analyst": "Jane Doe",
-    "summary_ko": ["HBM 수요가 2027년까지 공급을 웃돈다.", "모바일 DRAM 탑재량이 늘어난다.", "목표주가 상향."],
+    "thesis": "메모리 공급 부족이 2028년까지 이어져 스마트폰 DRAM 가격이 오른다.",
+    "scope": ["market", "vendor:Apple"],
+    "summary_ko": ["메모리 공급 부족이 2028년까지 이어진다.", "HBM 수요가 2027년까지 공급을 웃돈다 [p.2].",
+                   "모바일 DRAM 탑재량이 늘어난다 [p.3]."],
     "summary_en": "Management sees tight memory supply through CY28.",
     "keywords_ko": ["HBM", "모바일 DRAM"],
     "keywords_en": ["HBM", "mobile DRAM", "LPDDR5X"],
@@ -309,6 +312,8 @@ def test_decide(kind, relevance, load, expect):
 def test_validate_annotate_ok_and_title_rule():
     assert lr.validate_annotate(GOOD_ANNOTATE, META) == []
     assert lr.validate_annotate({**GOOD_ANNOTATE, "topics": ["스마트워치"]}, META) == []
+    assert lr.validate_annotate({**GOOD_ANNOTATE, "scope": ["band:low", "vendor:Samsung Electronics"]}, META) == []
+    assert lr.validate_annotate({**GOOD_ANNOTATE, "summary_ko": ["주장."] + ["근거 [p.1]"] * 5}, META) == []
     assert lr.validate_triage({**GOOD_TRIAGE, "kind": "firm_analysis"}) == []
     no_title = {k: v for k, v in GOOD_ANNOTATE.items() if k != "title"}
     assert lr.validate_annotate(no_title, META) == []  # filename title is used
@@ -325,10 +330,26 @@ def test_validate_annotate_ok_and_title_rule():
     ({"ticker": "X" * 21}, "ticker"),
     ({"key_numbers": None}, "key_numbers"),
     ({"summary": "x"}, "모르는 키"),
+    ({"summary_ko": ["주장.", "근거 [p.2]"] * 3 + ["근거 [p.3]"]}, "summary_ko"),
+    ({"summary_ko": ["주장.", "페이지 표시 없는 근거", "근거 [p.2]"]}, "[p.N]"),
+    ({"thesis": "짧은 주장"}, "thesis"),
+    ({"thesis": "첫 줄\n둘째 줄 주장입니다"}, "thesis"),
+    ({"scope": ["vendors:Apple"]}, "scope"),
+    ({"scope": ["band:premium"]}, "scope"),
+    ({"scope": ["vendor:A, B"]}, "scope"),
+    ({"scope": []}, "scope"),
+    ({"scope": ["market"] * 7}, "scope"),
+    ({"scope": "market"}, "scope"),
 ])
 def test_validate_annotate_errors(patch, word):
     errs = lr.validate_annotate({**GOOD_ANNOTATE, **patch}, META)
     assert any(word in e for e in errs), errs
+
+
+def test_validate_annotate_requires_thesis_and_scope():
+    for key in ("thesis", "scope"):
+        errs = lr.validate_annotate({k: v for k, v in GOOD_ANNOTATE.items() if k != key}, META)
+        assert any(key in e for e in errs), errs
 
 
 def write_report(st: Path, rid: str, triage=None, annotate=None, **meta) -> Path:
@@ -382,6 +403,7 @@ def test_build_row_joins_fields():
     assert row["summary"] == "\n".join(GOOD_ANNOTATE["summary_ko"]) + "\n" + GOOD_ANNOTATE["summary_en"]
     assert row["keywords"] == "HBM, 모바일 DRAM, HBM, mobile DRAM, LPDDR5X"
     assert row["topics"] == "메모리, 스마트폰" and row["report_type"] == "company_update"
+    assert (row["thesis"], row["scope"]) == (GOOD_ANNOTATE["thesis"], "market, vendor:Apple")
     assert row["minio_key"] == ("reports/JPMorgan/2026-10-06_Micron_Technology_Mgmt_Meeting_CY27_and_CY28_"
                                 "Both_Significan_a1b2c3.pdf")
     assert (row["ticker"], row["market"], row["body_loaded"]) == ("MU", "USQ", True)
@@ -478,6 +500,8 @@ def test_load_local_creates_table_and_accumulates(staging, capsys):
     assert "exists aaaaaaaaaaaa" in capsys.readouterr().out
     with pgserver.get_server(staging / "localpg") as s, psycopg.connect(s.get_uri()) as c:
         assert c.execute(f"SELECT count(*) FROM {lr.TABLE}").fetchone()[0] == 1
+        assert c.execute(f"SELECT thesis, scope FROM {lr.TABLE}").fetchall() == [
+            (GOOD_ANNOTATE["thesis"], "market, vendor:Apple")]
 
 
 # ---------- fix wave ----------

@@ -272,8 +272,9 @@ KINDS = ("link_digest", "weekly_note", "company_update", "industry_deep_dive", "
 RELEVANCE = ("high", "medium", "low")
 TOPICS = ("스마트폰", "AP", "메모리", "카메라", "디스플레이", "모뎀", "파운드리", "OEM", "공급망", "거시", "스마트워치")
 TRIAGE_KEYS = {"kind", "relevance", "reason", "load"}
-ANNOTATE_KEYS = {"title", "ticker", "analyst", "summary_ko", "summary_en", "keywords_ko", "keywords_en",
-                 "topics", "key_numbers"}
+ANNOTATE_KEYS = {"title", "ticker", "analyst", "thesis", "scope", "summary_ko", "summary_en", "keywords_ko",
+                 "keywords_en", "topics", "key_numbers"}
+SCOPE_RE = re.compile(r"market|vendor:[^,\s][^,\n]*|band:(high|mid|low)")
 
 
 def _line(v) -> bool:
@@ -316,9 +317,18 @@ def validate_annotate(a, meta: dict) -> list[str]:
     for key, limit in (("ticker", 20), ("analyst", 100)):
         if key in a and not (_line(a[key]) and len(a[key]) <= limit):
             errs.append(f"{key} 는 {limit}자 이하 한 줄 (모르면 키를 빼세요)")
+    thesis = a.get("thesis")
+    if not (_line(thesis) and 10 <= len(thesis) <= 300):
+        errs.append("thesis 는 레포트의 주장을 담은 10~300자 한 줄 한국어 문장 (필수)")
+    scope = a.get("scope")
+    if not (isinstance(scope, list) and 1 <= len(scope) <= 6
+            and all(isinstance(x, str) and SCOPE_RE.fullmatch(x) for x in scope) and len(", ".join(scope)) <= 300):
+        errs.append("scope 는 market, vendor:<업체명>, band:<high|mid|low> 중 1~6개의 목록 (업체명에 쉼표 없이)")
     ko = a.get("summary_ko")
-    if not (isinstance(ko, list) and len(ko) == 3 and all(_line(x) for x in ko)):
-        errs.append("summary_ko 는 한 줄짜리 한국어 문장 3개의 목록")
+    if not (isinstance(ko, list) and 3 <= len(ko) <= 6 and all(_line(x) for x in ko)):
+        errs.append("summary_ko 는 한 줄짜리 한국어 문장 3~6개의 목록")
+    elif not all("[p." in x for x in ko[1:]):
+        errs.append("summary_ko 2번째 줄부터는 근거이며 [p.N] 을 포함")
     if not _line(a.get("summary_en")):
         errs.append("summary_en 은 영어 한 줄")
     for key in ("keywords_ko", "keywords_en"):
@@ -453,6 +463,8 @@ CREATE TABLE IF NOT EXISTS sales_team.nasdaq_report_doc (
   summary TEXT,
   keywords VARCHAR(500),
   key_numbers TEXT,
+  thesis VARCHAR(300),
+  scope VARCHAR(300),
   body TEXT,
   body_loaded BOOLEAN NOT NULL DEFAULT FALSE,
   loaded_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -461,7 +473,8 @@ CREATE TABLE IF NOT EXISTS sales_team.nasdaq_report_doc (
 );
 """
 COLUMNS = ("firm", "published_on", "title", "report_type", "topics", "analyst", "pages", "minio_key",
-           "file_sha256", "summary", "keywords", "key_numbers", "body", "body_loaded", "ticker", "market")
+           "file_sha256", "summary", "keywords", "key_numbers", "thesis", "scope", "body", "body_loaded", "ticker",
+           "market")
 INSERT = (f"INSERT INTO {TABLE} ({', '.join(COLUMNS)}) "
           f"VALUES ({', '.join(f'%({c})s' for c in COLUMNS)})")
 
@@ -486,6 +499,8 @@ def build_row(meta: dict, triage: dict, ann: dict, body: str) -> dict:
         "summary": "\n".join(ann["summary_ko"]) + "\n" + ann["summary_en"],
         "keywords": ", ".join(ann["keywords_ko"] + ann["keywords_en"]),
         "key_numbers": ann["key_numbers"] or None,
+        "thesis": ann["thesis"],
+        "scope": ", ".join(ann["scope"]),
         "body": body,
         "body_loaded": True,
         "ticker": ann.get("ticker") or meta["ticker"],
