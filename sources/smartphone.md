@@ -11,22 +11,34 @@ summary: 스마트폰 시장 데이터 (모델/출하량/점유율 등)
 |---|---|---|
 | __사내 에이전트가 `query.py schema smartphone` 출력으로 채움__ | | |
 
+## 조사기관 (research firms)
+
+- 기관 컬럼: `__FIRM_COLUMN__` (사내 에이전트가 실제 컬럼명으로 교체)
+- 등록된 기관 목록 (적재 시 표기 통일됨):
+  | 기관 | 커버리지 메모 |
+  |---|---|
+  | __사내 에이전트가 `SELECT DISTINCT <기관컬럼>` 결과로 채움__ | |
+- 적재 규칙: 기관명 표기, 기간 형식(예: 2026Q2), 단위는 적재 시 통일한다. 에이전트가 쿼리에서 보정하지 않는다.
+- 같은 모델·기간 행이 기관 수만큼 존재한다. 기관으로 필터하지 않은 SUM은 중복 집계다.
+
 ## 자주 쓰는 쿼리 (컬럼명은 schema 출력에 맞춰 바꿀 것)
 
 ```sql
 -- 분기별 총 출하량
 SELECT quarter, SUM(shipments) AS shipments
-FROM smartphone_market_data GROUP BY quarter ORDER BY quarter;
+FROM smartphone_market_data WHERE <기관컬럼> = '<기관>'
+GROUP BY quarter ORDER BY quarter;
 
 -- 특정 분기 제조사 점유율
 SELECT vendor, SUM(shipments) AS s,
        ROUND(100.0 * SUM(shipments) / SUM(SUM(shipments)) OVER (), 1) AS share_pct
-FROM smartphone_market_data WHERE quarter = '2026Q2'
+FROM smartphone_market_data WHERE quarter = '2026Q2' AND <기관컬럼> = '<기관>'
 GROUP BY vendor ORDER BY s DESC;
 
 -- YoY: 같은 분기 전년 대비 (quarter 형식 'YYYYQn' 가정)
 WITH q AS (
-  SELECT quarter, SUM(shipments) s FROM smartphone_market_data GROUP BY quarter
+  SELECT quarter, SUM(shipments) s FROM smartphone_market_data
+  WHERE <기관컬럼> = '<기관>' GROUP BY quarter
 )
 SELECT a.quarter, a.s, b.s AS prev_year, ROUND(100.0 * (a.s - b.s) / b.s, 1) AS yoy_pct
 FROM q a LEFT JOIN q b ON b.quarter = (LEFT(a.quarter, 4)::int - 1) || RIGHT(a.quarter, 2)

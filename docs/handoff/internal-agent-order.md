@@ -14,6 +14,7 @@ already built and tested. Do the following in order; stop and report if any step
 | `install.ps1`, `README.md` | `__REPO_URL__` | internal GitHub repo URL, no trailing `.git` |
 | `install.ps1` | `__FILL_DSN__` | `postgresql://USER:PASSWORD@HOST:5432/DBNAME` (shared read-only account) |
 | `install.ps1` | `__FILL_MINIO__` | `http(s)://ACCESS:SECRET@HOST:PORT/BUCKET` (URL-encode special chars in SECRET) |
+| `sources/smartphone.md` | `__FIRM_COLUMN__` | the column holding the research-firm name |
 
 The repo MUST be private to the team: the installer embeds shared credentials.
 
@@ -29,11 +30,18 @@ Expected: `can_insert = false`. If true, stop and report; do not distribute.
 - Replace `__KEY_COLUMN__` with the real column that holds the MinIO object key.
 - Adjust the example queries so column names match the real schema; run each one once.
 
+## 3b. Research-firm check
+- Run `python scripts/query.py sql smartphone "SELECT <firm column>, COUNT(*) FROM smartphone_market_data GROUP BY 1 ORDER BY 2 DESC"`.
+- Fill the firm table in `sources/smartphone.md` (one row per distinct value, with a one-line coverage note).
+- If the same firm appears under different spellings, or periods/units differ between firms, report it: the owner
+  normalizes keys at load time; do not patch it in the skill.
+
 ## 4. Integration check (all must succeed)
 ```
 python scripts/query.py sources            # both 설정됨
 python scripts/query.py schema smartphone
 python scripts/query.py sql smartphone "SELECT COUNT(*) FROM smartphone_market_data"
+python scripts/query.py sql smartphone "SELECT <firm column>, COUNT(*) FROM smartphone_market_data GROUP BY 1"
 python scripts/query.py ls minio ""
 python scripts/query.py fetch minio "<one key from step 3>" --out %TEMP%\mi-sonar-fetch-test.bin
 python -m pytest scripts -q
