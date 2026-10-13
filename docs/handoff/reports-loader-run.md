@@ -32,7 +32,7 @@ judgements and write them into two small JSON files per report. You never write 
 ```powershell
 python --version                       # 3.10 or newer
 pip install -r requirements-dev.txt    # pdfplumber, pypdf, pgserver, pytest
-python -m pytest tools scripts -q      # all pass before you start
+python -m pytest -q                    # all pass before you start
 ```
 
 ## 1. Extract
@@ -176,8 +176,8 @@ Remove-Item Env:MI_DB_REPORTS_WRITE, Env:MI_MINIO_WRITE
 Then check what colleagues will see (read-only account):
 
 ```powershell
-python scripts/query.py sources    # reports: 설정됨
-python scripts/query.py sql reports "SELECT firm, COUNT(*) AS n, MAX(published_on) AS latest FROM sales_team.nasdaq_report_doc GROUP BY firm ORDER BY n DESC"
+python skills/mi-sonar/scripts/query.py sources    # reports: 설정됨
+python skills/mi-sonar/scripts/query.py sql reports "SELECT firm, COUNT(*) AS n, MAX(published_on) AS latest FROM sales_team.nasdaq_report_doc GROUP BY firm ORDER BY n DESC"
 ```
 
 ## Report back

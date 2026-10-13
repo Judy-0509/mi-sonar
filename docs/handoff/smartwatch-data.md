@@ -22,7 +22,7 @@ Two jobs, both done on this PC:
 ## 1. Excel to CSV
 
 Output one file per publication month: `smartwatch_<YYYY-MM>.csv` (the publication month of the Excel file).
-Columns and allowed values are defined by `python tools/load_smartwatch.py -h` and `sources/smartwatch.md`.
+Columns and allowed values are defined by `python tools/load_smartwatch.py -h` and `skills/mi-sonar/sources/smartwatch.md`.
 Rules the owner already approved:
 
 - Common:

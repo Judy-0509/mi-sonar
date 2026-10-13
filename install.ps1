@@ -1,12 +1,23 @@
 ﻿<#
-mi-sonar installer / updater (Windows, PowerShell 5.1+)
-Install (README one-liner):  git clone <repo-url> "$HOME\.claude\skills\mi-sonar"; powershell -ExecutionPolicy Bypass -File "$HOME\.claude\skills\mi-sonar\install.ps1"
-Update (second half only):   powershell -ExecutionPolicy Bypass -File "$HOME\.claude\skills\mi-sonar\install.ps1"
-Local test:                  .\install.ps1 -NoEnv
+mi-sonar installer / updater (Windows, PowerShell 5.1+). Run once per PC; safe to re-run.
+
+Claude Code (plugin):
+  1) in Claude Code:  /plugin marketplace add __REPO_URL__
+  2)                  /plugin install mi-sonar@mi-sonar
+  3) ask Claude "mi-sonar 설치 확인" -> the session-start hook shows this file's path
+  4) run that path once:  powershell -ExecutionPolicy Bypass -File "<plugin folder>\install.ps1"
+  Update: /plugin update mi-sonar@mi-sonar   (or `claude plugin marketplace update mi-sonar` first)
+
+OpenCode (clone + junction ~/.claude/skills/mi-sonar):
+  git clone __REPO_URL__ "$HOME\.claude\mi-sonar"; powershell -ExecutionPolicy Bypass -File "$HOME\.claude\mi-sonar\install.ps1" -OpenCode
+  Update: same command without the clone (git pull runs inside)
+
+Local test:  .\install.ps1 -NoEnv
 #>
 param(
-    [string]$Dest = $PSScriptRoot,   # the cloned skill folder this script lives in
-    [switch]$NoEnv
+    [string]$Dest = $PSScriptRoot,   # repo / plugin root this script lives in
+    [switch]$NoEnv,
+    [switch]$OpenCode                # also link ~/.claude/skills/mi-sonar -> <root>\skills\mi-sonar
 )
 $ErrorActionPreference = "Stop"
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -19,13 +30,12 @@ $EnvVars = @{
 
 function Step($msg) { Write-Host "[mi-sonar] $msg" -ForegroundColor Cyan }
 
-# 1. update the skill folder (the README one-liner cloned it)
-if (-not (Test-Path (Join-Path $Dest ".git"))) {
-    throw "스킬 폴더가 git clone으로 받은 폴더가 아닙니다. README의 설치 한 줄을 다시 실행하세요."
+# 1. update a git clone (OpenCode install); the Claude Code plugin is updated by /plugin update
+if (Test-Path (Join-Path $Dest ".git")) {
+    Step "업데이트: git pull"
+    git -C $Dest pull --ff-only
+    if ($LASTEXITCODE) { throw "git pull 실패 (exit $LASTEXITCODE)" }
 }
-Step "업데이트: git pull"
-git -C $Dest pull --ff-only
-if ($LASTEXITCODE) { throw "git pull 실패 (exit $LASTEXITCODE)" }
 
 # 2. Python 3.10+ ("python" may be the Microsoft Store stub, exit 9009 -> try the py launcher) + packages
 $noPy = "Python 3.10 이상을 설치하고 'Add python.exe to PATH'를 켠 뒤 다시 실행하세요."
@@ -55,10 +65,25 @@ if (-not $NoEnv) {
     Step "환경변수 등록: $($EnvVars.Keys -join ', ')"
 }
 
-# 4. self-check (OpenCode reads ~/.claude/skills natively: no extra registration)
+# 4. OpenCode only: junction ~/.claude/skills/mi-sonar (Claude Code gets the skill from the plugin; a junction would duplicate it)
+$skill = Join-Path $Dest "skills\mi-sonar"
+if ($OpenCode) {
+    $link = Join-Path $HOME ".claude\skills\mi-sonar"
+    $old = Get-Item -LiteralPath $link -Force -ErrorAction SilentlyContinue
+    if ($old -and -not ($old.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        Write-Host "[mi-sonar] $link 가 실제 폴더라서 링크를 만들지 않았습니다 (지우지 않음). 이전 방식 설치본이면 직접 지우고 다시 실행하세요." -ForegroundColor Yellow
+    } else {
+        if ($old) { [IO.Directory]::Delete($link) }   # removes the junction only, never the target's files
+        New-Item -ItemType Directory -Force (Split-Path $link) | Out-Null
+        New-Item -ItemType Junction -Path $link -Target $skill | Out-Null
+        Step "OpenCode 스킬 링크: $link -> $skill"
+    }
+}
+
+# 5. self-check
 & $py -c "import psycopg, minio"
 if ($LASTEXITCODE) { throw "패키지 확인(import psycopg, minio) 실패 (exit $LASTEXITCODE)" }
-& $py (Join-Path $Dest "scripts\query.py") sources
+& $py (Join-Path $skill "scripts\query.py") sources
 if ($LASTEXITCODE) { throw "query.py sources 실패 (exit $LASTEXITCODE)" }
 Write-Host ""
 Write-Host "설치 완료. 새 터미널을 열고 Claude 또는 OpenCode에게 'mi-sonar 설치 확인해줘' 라고 하세요." -ForegroundColor Green
