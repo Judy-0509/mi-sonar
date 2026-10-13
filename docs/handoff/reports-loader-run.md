@@ -45,7 +45,9 @@ python tools/load_reports.py status
 `extract` prints one line per PDF, for example
 `ok   3f9a0c1d2e4b 2026-10-06 JPMorgan pages=13 body=7 cut=Analyst Certification phone=12 url=0 06-Oct-2026_…pdf`
 (`body` = pages kept before the disclosure tail, `phone` = smartphone word count, `url` = link count).
-Running it again skips PDFs that are already extracted. Check the output:
+Pasted TechInsights articles (`.md`, saved in `staging/inbox`) can go in the same call, e.g.
+`python tools/load_reports.py extract "D:\path\to\reports" staging/inbox`. Running it again skips files that are already
+extracted (matched by sha256, unless `--force`). Check the output:
 
 - `FAIL <file>: ValueError: 파일명 형식 불일치` → the name is not `DD-Mon-YYYY_HH-MM-SS-…`. Report it.
 - Firm, ticker or title in `status` is clearly wrong (misparsed name) → with the owner's OK rename the PDF to

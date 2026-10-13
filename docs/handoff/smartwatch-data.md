@@ -23,6 +23,9 @@ Two jobs, both done on this PC:
 
 Output one file per publication month: `smartwatch_<YYYY-MM>.csv` (the publication month of the Excel file).
 Columns and allowed values are defined by `python tools/load_smartwatch.py -h` and `skills/mi-sonar/sources/smartwatch.md`.
+The owner obtains the Excel files (for example through the in-company `ear` skill from EDM) and gives you their
+paths. Use only those files; never search for or open any other Excel file.
+
 Rules the owner already approved:
 
 - Common:
@@ -52,20 +55,24 @@ Validation report (print it for the owner, numbers only):
 
 ## 2. TechInsights analysis article to Markdown
 
-The owner pastes the article text to you. Save it as a `.md` file in the same folder as the broker PDFs.
+The owner pastes the article text into the chat (and, if known, the title and publication date) and says
+"이거 적재해줘" / "load this". Ask only for a missing title or publication date. Then:
+
+1. Write it as a `.md` file in `staging/inbox/` (create the folder; `staging/` is gitignored).
+2. Run `extract` on that folder.
+3. Continue with triage and annotate below.
 
 - Filename: `DD-Mon-YYYY_HH-MM-SS-TechInsights-<TITLE>.md`, for example
   `06-Oct-2026_00-00-00-TechInsights-Smartwatch_Q3_Analysis.md`. The date is the article's publication date; use
   `00-00-00` if no time is known. Title words are joined with `_`.
 - First line: `# <article title>` (exactly as published). The program uses it as the report title.
-- Then paste the paragraphs verbatim. No edits, no summary, no translation, no added headings, no "improved" wording.
-  Copy numbers exactly.
-- Do not change the PDFs in that folder.
+- Then paste the paragraphs verbatim, UTF-8. No edits, no summary, no translation, no added headings, no "improved"
+  wording. Copy numbers exactly.
 
 Then run the pipeline exactly as in `docs/handoff/reports-loader-run.md` (stages 1 to 4a):
 
 ```powershell
-python tools/load_reports.py extract "D:\path\to\reports"    # PDFs and .md/.txt files are both picked up
+python tools/load_reports.py extract staging/inbox    # .md/.txt files are picked up like PDFs
 python tools/load_reports.py status
 ```
 
