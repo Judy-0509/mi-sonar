@@ -1,7 +1,7 @@
 # 주간보고 설계 (1차)
 
 작성일: 2026-10-14
-상태: **초안 / 검토 대기**
+상태: **초안, 루틴 확정**
 
 이번 주에 새로 들어온 자료로 주간보고 주제를 제안하고, 사용자가 고른 주제로 초안을 쓰는 흐름입니다. 레포트 표와 주석(`thesis`, `scope`) 규칙은 [증권사 레포트 저장 설계](2026-10-13-reports-storage-design.md)를 따릅니다.
 
@@ -66,3 +66,20 @@
 1. 주간보고 원본 형식은 무엇인가 (PPT, Word, 메일 본문 등)?
 2. "지난 점검" 기준일을 어디에 저장하나 (`staging/` 안의 파일 vs 로컬 DB 표)?
 3. 오토 등 다른 응용처로 언제 포팅하나?
+
+## 주간 루틴 (사용자 확정 2026-10-14)
+
+| 언제 | 사용자가 말하면 | 에이전트 | 사람 |
+|---|---|---|---|
+| 월 오전 | "나스닥 레포트 업데이트 해줘" + zip 폴더 경로 | `extract <zip>` → triage → `triage.md` → annotate → `status` | triage 검토, `load --dsn-env MI_DB_REPORTS_WRITE` 직접 1회 |
+| 월 오전 | "이번 주 주간보고 주제 찾아줘" | 지난 실행 이후 새 레포트 `thesis/scope` 목록 + 스냅샷 diff + 지난 4주 주제 제외 → 후보 2~5개(근거·왜 지금) | 후보 선택 |
+| 화~수 | "주간보고 작성해줘 (N번)" | `design/weekly-rules.md`·`design/weekly-tone.md` 대로 초안 **최소 2개 버전**(예: 데이터 중심 / 레포트 주장 중심) md 저장 → 로컬 `weekly_report` 에 기록 | 버전 선택·수정 |
+
+- 자동 실행 없음(사람 관문 때문). "지난 실행" 기준일 = 마지막 스냅샷 파일. 상태는 `staging/weekly/` (PC 안).
+- 만들 것:
+  - `skills/mi-sonar/scripts/snapshot.py` (읽기 전용)
+  - `tools/load_weekly.py` (2026 주간보고 md → 로컬 `weekly_report`; 주당 1파일, 첫 줄 `# 제목`, 파일명에 주차 날짜)
+  - `design/weekly-rules.md` (OpenCode 가 2026 주간보고에서 추출 → 사용자 수정)
+  - `design/weekly-tone.md` (사내 비공개)
+  - SKILL 단계 3개 (위 표의 문구가 트리거)
+- 순서: 컬럼명 확인(day1 STEP 1) → snapshot → load_weekly → SKILL 단계.
