@@ -7,9 +7,13 @@ summary: 스마트폰 시장 데이터 (모델/출하량/점유율 등)
 ---
 ## 컬럼 의미
 
+사내 에이전트가 처음 쓸 때 `python "${CLAUDE_SKILL_DIR}/scripts/query.py" schema smartphone` 를 실행해 컬럼명·타입·DB comment 를 이 표에 채우고, comment 가 없는 컬럼은 사용자에게 의미를 물어 `의미` 칸에 적는다. 채운 표는 공개 레포에 커밋해도 된다 (컬럼명·설명은 비밀 아님; 값·행은 적지 않는다).
+
 | column | 의미 | 비고 |
 |---|---|---|
-| __사내 에이전트가 `query.py schema smartphone` 출력으로 채움__ | | |
+| | | |
+| | | |
+| | | |
 
 ## 조사기관 (research firms)
 

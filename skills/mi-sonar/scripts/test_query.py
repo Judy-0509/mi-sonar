@@ -327,3 +327,31 @@ def test_cli_exit_codes():
 def test_cli_kind_mismatch_exit_1():
     r = _run("sql", "minio", "SELECT 1", env_extra={"MI_MINIO": "http://AK:TopSecret99@h:9000/b"})
     assert r.returncode == 1 and "kind=postgres" in r.stderr and "TopSecret99" not in r.stderr
+
+
+@pytest.fixture(scope="module")
+def pg_dsn(tmp_path_factory):
+    pgserver = pytest.importorskip("pgserver")
+    import psycopg
+    with pgserver.get_server(tmp_path_factory.mktemp("pgdata")) as s:
+        with psycopg.connect(s.get_uri(), autocommit=True) as c:
+            c.execute("CREATE TABLE with_c(a int, b text)")
+            c.execute("INSERT INTO with_c VALUES (1, 'x')")
+            c.execute("COMMENT ON TABLE with_c IS '출하량 테이블'")
+            c.execute("COMMENT ON COLUMN with_c.a IS '출하 대수'")
+            c.execute("CREATE TABLE no_c(a int)")
+            c.execute("INSERT INTO no_c VALUES (1)")
+        yield s.get_uri()
+
+
+def test_cmd_schema_shows_comments(pg_dsn):
+    out = q.cmd_schema({"conn": pg_dsn, "tables": ["with_c"]})
+    assert "설명: 출하량 테이블" in out
+    assert "| column | type | nullable | comment |" in out
+    assert "출하 대수" in out
+
+
+def test_cmd_schema_without_comments_unchanged(pg_dsn):
+    out = q.cmd_schema({"conn": pg_dsn, "tables": ["no_c"]})
+    assert "comment" not in out and "설명:" not in out
+    assert "| column | type | nullable |" in out

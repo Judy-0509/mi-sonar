@@ -197,12 +197,33 @@ def cmd_schema(src: dict) -> str:
                     where += " AND table_schema=%s"
                     params.append(parts[-2])
                 cur.execute(
-                    "SELECT column_name, data_type, is_nullable FROM information_schema.columns "
-                    f"WHERE {where} ORDER BY ordinal_position",
+                    "SELECT c.column_name, c.data_type, c.is_nullable, "
+                    "COALESCE(pg_catalog.col_description("
+                    "(quote_ident(c.table_schema) || '.' || quote_ident(c.table_name))::regclass, "
+                    "c.ordinal_position), '') AS comment "
+                    f"FROM information_schema.columns c WHERE {where} ORDER BY c.ordinal_position",
                     params,
                 )
                 cols = cur.fetchall()
-                out.append(f"## {t}\n" + format_table(["column", "type", "nullable"], cols))
+                heads = ["column", "type", "nullable"]
+                if any(r[3] for r in cols):
+                    heads.append("comment")
+                else:
+                    cols = [r[:3] for r in cols]
+                tschema = parts[-2] if len(parts) > 1 else None
+                if tschema is None:
+                    cur.execute("SELECT table_schema FROM information_schema.columns WHERE table_name=%s LIMIT 1", [parts[-1]])
+                    row = cur.fetchone()
+                    tschema = row[0] if row else None
+                tcomment = ""
+                if tschema:
+                    cur.execute(
+                        "SELECT obj_description((quote_ident(%s) || '.' || quote_ident(%s))::regclass, 'pg_class')",
+                        [tschema, parts[-1]],
+                    )
+                    tcomment = (cur.fetchone() or [""])[0] or ""
+                head = f"## {t}\n" + (f"설명: {tcomment}\n" if tcomment else "")
+                out.append(head + format_table(heads, cols))
                 cur.execute(pgsql.SQL("SELECT * FROM {} LIMIT 3").format(pgsql.Identifier(*parts)))
                 sample = cur.fetchall()
                 out.append("샘플 3행:\n" + format_table([d.name for d in cur.description], sample))

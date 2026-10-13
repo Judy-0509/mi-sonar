@@ -43,6 +43,7 @@ Set both env vars in the current shell, then run these 4 read-only checks with
 - Run `python skills/mi-sonar/scripts/query.py schema smartphone`.
 - Copy the column/type table into the `## 컬럼 의미` section and write a one-line meaning
   for each column (ask the owner for any you cannot infer from the sample rows).
+- `schema` also prints DB comments (table `설명:` line, `comment` column) when they exist. Fill the column table in `skills/mi-sonar/sources/smartphone.md` from that output, ask the owner for any column whose meaning is unclear, and commit it to the repo. Never paste data rows into the file.
 - Replace `__KEY_COLUMN__` with the real column that holds the MinIO object key.
 - Adjust the example queries so column names match the real schema; run each one once.
 - In the column table, mark which columns hold the period granularity (weekly/monthly), region, model and period; the mixing rules in `skills/mi-sonar/SKILL.md` step 4 depend on them.
