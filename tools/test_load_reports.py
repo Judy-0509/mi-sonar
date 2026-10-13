@@ -402,6 +402,11 @@ def test_load_dsn_env_refuses_missing_table(srv, staging, monkeypatch, capsys):
     monkeypatch.setenv("MI_DB_REPORTS_WRITE", srv.get_uri("empty_db"))
     assert lr.main(["--staging", str(staging), "load", "--dsn-env", "MI_DB_REPORTS_WRITE", "--no-minio"]) == 1
     assert "DBaaS" in capsys.readouterr().err
+    import psycopg
+
+    with psycopg.connect(srv.get_uri("empty_db")) as c:  # no DDL ran: neither the table nor its schema exists
+        assert c.execute("SELECT to_regclass(%s)", (lr.TABLE,)).fetchone()[0] is None
+        assert c.execute("SELECT to_regnamespace('sales_team')").fetchone()[0] is None
 
 
 def test_load_local_creates_table_and_accumulates(staging, capsys):
@@ -417,3 +422,83 @@ def test_load_local_creates_table_and_accumulates(staging, capsys):
     assert "exists aaaaaaaaaaaa" in capsys.readouterr().out
     with pgserver.get_server(staging / "localpg") as s, psycopg.connect(s.get_uri()) as c:
         assert c.execute(f"SELECT count(*) FROM {lr.TABLE}").fetchone()[0] == 1
+
+
+# ---------- fix wave ----------
+
+def test_load_local_with_non_ascii_staging_path(tmp_path):
+    pytest.importorskip("pgserver")
+    st = tmp_path / "★ 한글"
+    write_report(st, "aaaaaaaaaaaa", GOOD_TRIAGE, GOOD_ANNOTATE)
+    assert lr.main(["--staging", str(st), "load", "--local"]) == 0
+
+
+@pytest.mark.parametrize("secret", ["postgresql://writer:TOPSECRET@h/db", "bad name"])
+def test_dsn_env_must_be_a_name_and_is_not_echoed(staging, capsys, secret):
+    assert lr.main(["--staging", str(staging), "load", "--dsn-env", secret]) == 2
+    cap = capsys.readouterr()
+    assert "TOPSECRET" not in cap.out + cap.err and secret not in cap.out + cap.err
+
+
+@pytest.mark.parametrize("dsn,tails", [
+    ("postgresql://writer:Pa@ssW0rd@127.0.0.1:1/db", ["ssW0rd", "Pa@ss"]),
+    ("postgresql://writer:Pa%40ssW0rd@127.0.0.1:1/db", ["ssW0rd", "Pa%40ss", "Pa@ss"]),
+    ("postgresql://writer:ZZsecretZZ@127.0.0.1:1/db", ["ZZsecretZZ"]),
+])
+def test_load_never_leaks_password_fragments(staging, monkeypatch, capsys, dsn, tails):
+    monkeypatch.setenv("MI_DB_REPORTS_WRITE", dsn)
+    assert lr.main(["--staging", str(staging), "load", "--dsn-env", "MI_DB_REPORTS_WRITE", "--no-minio"]) in (1, 2)
+    cap = capsys.readouterr()
+    for t in tails:
+        assert t not in cap.out + cap.err
+
+
+def test_unencoded_at_in_dsn_password_is_refused(staging, monkeypatch, capsys):
+    monkeypatch.setenv("MI_DB_REPORTS_WRITE", "postgresql://writer:Pa@ssW0rd@127.0.0.1:1/db")
+    assert lr.main(["--staging", str(staging), "load", "--dsn-env", "MI_DB_REPORTS_WRITE", "--no-minio"]) == 2
+    assert "%40" in capsys.readouterr().err
+
+
+def test_extract_cuts_heading_with_ligature(tmp_path, monkeypatch):
+    pdf = tmp_path / "06-Oct-2026_08-02-29-JPMorgan.pdf"
+    pdf.write_bytes(b"%PDF-1.4 x")
+    pages = ["p1", "body\nAnalyst Certi\ufb01cation\nI certify", "more"]
+    monkeypatch.setattr(lr, "read_pages", lambda p: (pages, "fake"))
+    lr.extract_one(pdf, tmp_path / "st", False)
+    meta = json.loads(next((tmp_path / "st").glob("*/meta.json")).read_text(encoding="utf-8"))
+    assert meta["cut_heading"] is not None and "I certify" not in next((tmp_path / "st").glob("*/text.txt")).read_text(encoding="utf-8")
+
+
+def test_need_missing_package_is_setup_error():
+    with pytest.raises(lr.LoaderError) as e:
+        lr.need("no_such_package_xyz")
+    assert e.value.code == 2
+
+
+def test_failed_upload_rolls_back_row(srv, staging, monkeypatch, capsys):
+    import psycopg
+
+    with psycopg.connect(srv.get_uri(), autocommit=True) as c:
+        c.execute("CREATE DATABASE m1_db")
+
+    class Boom(FakeMinio):
+        def fput_object(self, *a, **k):
+            raise OSError("upload down")
+
+    with psycopg.connect(srv.get_uri("m1_db"), autocommit=True) as c:
+        c.execute(lr.DDL)
+    monkeypatch.setattr(lr, "minio_client", lambda url: (Boom(), "b"))
+    monkeypatch.setenv("MI_DB_REPORTS_WRITE", srv.get_uri("m1_db"))
+    monkeypatch.setenv("MI_MINIO_WRITE", "http://AK:S@minio.local:9000/b")
+    assert lr.main(["--staging", str(staging), "load", "--dsn-env", "MI_DB_REPORTS_WRITE"]) == 1
+    assert "FAIL aaaaaaaaaaaa" in capsys.readouterr().out
+    with psycopg.connect(srv.get_uri("m1_db")) as c:
+        assert c.execute(f"SELECT count(*) FROM {lr.TABLE}").fetchone()[0] == 0
+
+
+def test_triage_json_with_bom_is_read(tmp_path, capsys):
+    st = tmp_path / "staging"
+    d = write_report(st, "aaaaaaaaaaaa", GOOD_TRIAGE, GOOD_ANNOTATE)
+    (d / "triage.json").write_text(json.dumps(GOOD_TRIAGE), encoding="utf-8-sig")
+    assert lr.main(["--staging", str(st), "status"]) == 0
+    assert "ERR" not in capsys.readouterr().out

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib
 import json
 import os
 import re
@@ -32,6 +33,14 @@ class LoaderError(Exception):
     def __init__(self, msg: str, code: int = 1):
         super().__init__(msg)
         self.code = code
+
+
+def need(module: str):
+    """Lazy import of a dev-only package; a missing one is a setup error (exit 2)."""
+    try:
+        return importlib.import_module(module)
+    except ImportError:
+        raise LoaderError(f"{module} 패키지가 없습니다: pip install -r requirements-dev.txt", 2) from None
 
 
 def redact(text: str, conn: str | None) -> str:
@@ -198,6 +207,7 @@ def extract_one(pdf: Path, staging: Path, force: bool) -> str:
     if old and not force:
         return f"skip {rid} (이미 추출됨) {pdf.name}"
     raw, extractor = read_pages(pdf)
+    raw = [unicodedata.normalize("NFKC", p) for p in raw]  # before the cut: ligatures/NBSP would defeat CUT_RE
     pages, heading = cut_disclosure(strip_repeated_lines(raw))
     body = render_body(pages)
     meta = {
@@ -468,7 +478,8 @@ def build_row(meta: dict, triage: dict, ann: dict, body: str) -> dict:
 
 def minio_client(url: str):
     """(client, bucket) from http(s)://ACCESS:SECRET@host:port/bucket, the same format as MI_MINIO."""
-    from minio import Minio
+    Minio = need("minio").Minio
+    urllib3 = need("urllib3")
 
     u = urlparse(url)
     bucket = u.path.strip("/")
@@ -476,16 +487,19 @@ def minio_client(url: str):
         raise LoaderError(f"{MINIO_ENV} 형식은 http(s)://ACCESS:SECRET@host:port/bucket 이어야 합니다.", 2)
     endpoint = u.hostname + (f":{u.port}" if u.port else "")
     client = Minio(endpoint, access_key=unquote(u.username), secret_key=unquote(u.password),
-                   secure=u.scheme == "https")
+                   secure=u.scheme == "https",
+                   http_client=urllib3.PoolManager(timeout=urllib3.Timeout(connect=10, read=120),
+                                                   retries=urllib3.Retry(total=2)))
     return client, bucket
 
 
 def load_all(staging: Path, dsn: str, target: str, create: bool, minio_url: str) -> int:
-    import psycopg
+    psycopg = need("psycopg")
 
     mc = minio_client(minio_url) if minio_url else None
     counts = Counter()
-    with psycopg.connect(dsn, connect_timeout=10, autocommit=True) as conn:
+    with psycopg.connect(dsn, connect_timeout=10, autocommit=True,
+                      prepare_threshold=None) as conn:  # no server-side prepare: safe behind PgBouncer transaction pooling
         if create:
             conn.execute(DDL)
         elif conn.execute("SELECT to_regclass(%s)", (TABLE,)).fetchone()[0] is None:
@@ -504,9 +518,9 @@ def load_all(staging: Path, dsn: str, target: str, create: bool, minio_url: str)
                     if conn.execute(f"SELECT 1 FROM {TABLE} WHERE file_sha256 = %s", (m["file_sha256"],)).fetchone():
                         result = "exists"
                     else:
+                        conn.execute(INSERT, row)  # INSERT first: an upload failure raises and rolls the row back
                         if mc:
                             mc[0].fput_object(mc[1], row["minio_key"], m["source_path"], content_type="application/pdf")
-                        conn.execute(INSERT, row)
                         result = "loaded"
             except Exception as e:  # report the failure, keep going with the next report
                 counts["fail"] += 1
@@ -526,13 +540,23 @@ def cmd_load(staging: Path, local: bool, dsn_env: str | None, no_minio: bool) ->
     if not (local or no_minio or minio_url):
         raise LoaderError(f"환경변수 {MINIO_ENV} 가 없습니다 (MinIO 없이 적재하려면 --no-minio).", 2)
     if local:
-        import pgserver
-
-        with pgserver.get_server(staging / "localpg") as srv:  # stops on exit, data stays in staging/localpg
+        pgserver = need("pgserver")
+        pgdata = staging / "localpg"
+        try:
+            srv = pgserver.get_server(pgdata)
+        except UnicodeDecodeError:  # ponytail: pgserver 0.1.4 decodes initdb output as cp949; initdb already succeeded
+            # pgserver registered the half-built instance before failing: drop it or the retry returns it unstarted
+            pgserver.postgres_server.PostgresServer._instances.pop(pgdata.resolve(), None)
+            srv = pgserver.get_server(pgdata)
+        with srv:  # stops on exit, data stays in staging/localpg
             return load_all(staging, srv.get_uri(), "local", True, "")
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", dsn_env):  # never echo the value: it may be a pasted DSN
+        raise LoaderError("--dsn-env 에는 환경변수 이름을 주세요", 2)
     dsn = os.environ.get(dsn_env, "")
     if not dsn:
         raise LoaderError(f"환경변수 {dsn_env} 가 설정되지 않았습니다 (이 터미널에서만 설정하세요).", 2)
+    if dsn.startswith(("postgres://", "postgresql://")) and "@" in dsn.rsplit("@", 1)[0]:
+        raise LoaderError(f"환경변수 {dsn_env} 의 비밀번호에 '@' 가 있습니다. URL 인코딩(%40)해서 다시 등록하세요.", 2)
     return load_all(staging, dsn, dsn_env, False, minio_url)
 
 
