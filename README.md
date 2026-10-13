@@ -1,6 +1,6 @@
 <p align="center"><img src="assets/banner.png" alt="mi-sonar" width="100%"></p>
 
-<p align="center">Claude Code / OpenCode에서 스마트폰 시장 데이터를 말로 물어보세요.</p>
+<p align="center">Claude Code / OpenCode에서 MI 시장 데이터를 말로 물어보고, 보고 자료 초안까지 받으세요.</p>
 
 <p align="center">
   <img alt="python" src="assets/badges/python.svg">
@@ -50,13 +50,24 @@ git clone __REPO_URL__ "$HOME\.claude\mi-sonar"; powershell -ExecutionPolicy Byp
 설치가 하는 일: Python 패키지를 설치하고, 접속 정보를 내 계정 환경변수(`MI_DB_SMARTPHONE`, `MI_MINIO`)에 넣습니다.
 `-OpenCode` 를 붙이면 `~/.claude/skills/mi-sonar` 링크도 만듭니다 (Claude Code 는 플러그인으로 스킬을 받으므로 링크를 만들지 않습니다).
 
-## 이렇게 물어보세요
+## 무엇을 할 수 있나요
 
-- "2026년 2분기 제조사별 점유율 보여줘"
-- "갤럭시 S 시리즈 최근 8개 분기 출하량 추세, 차트로"
-- "작년 동기 대비 가장 많이 성장한 모델 TOP 10"
-- "이 데이터의 원본 파일 받아줘"
-- "mi-sonar 설치 확인해줘"
+설치 후에는 따로 부르지 않아도 됩니다. 아래처럼 평소 말로 요청하면 Claude가 알아서 이 스킬을 읽고 움직입니다.
+
+| 이렇게 말하면 | Claude가 하는 일 | 지금 상태 |
+|---|---|---|
+| "2026년 2분기 제조사별 점유율 보여줘"<br>"갤럭시 S 최근 8분기 출하량 추세" | 스마트폰 시장 데이터(smartphone_market_data)를 SQL로 조회해 표·차트와 함께 답하고, 쓴 SQL을 보여줌 | 사용 가능 |
+| "이 데이터 원본 파일 받아줘" | MinIO에서 원본 파일을 내려받음 | 사용 가능 |
+| "삼성 관련 증권사 레포트 최근 3건 요약"<br>"애널리스트가 AP 가격에 대해 뭐라고 했어?" | 적재된 증권사 레포트에서 찾아 요약·핵심 숫자를 페이지 번호와 함께 인용 | 테이블 생성 대기 (없으면 "테이블 미생성"이라고 알려줌) |
+| "스마트워치 TAM 점검해줘" | 최신 TechInsights 실적 vs 우리 TAM 표, 전망 변화 표, 특이사항 메모, "다음 갱신 시 반영 검토" 목록. 갱신이 없는 분기는 기사·레포트 기반 정성 메모만 | 테이블 생성 대기 |
+| "스마트워치 자료 한 장 만들어줘" | 자료 규칙(`design/slide-rules.md`)과 사내 말투 샘플대로 쟁점 문장·카드 제목·bullet을 먼저 보여주고 확인 후 슬라이드 파일 생성 | 사용 가능 (말투 샘플은 담당자가 채움) |
+| "mi-sonar 설치 확인해줘" | 환경변수·접속·테이블 상태 점검 | 사용 가능 |
+
+### 어떻게 알아서 반응하나요
+
+- Claude Code를 켤 때마다 플러그인이 "MI 데이터·자료 요청은 mi-sonar 절차대로"라는 짧은 안내를 Claude에게 넣어줍니다(세션 시작 안내).
+- 스킬 설명에 "출하량, 점유율, 증권사 레포트, 스마트워치 TAM, 자료 만들어 …" 같은 말이 적혀 있어서, 요청에 그런 말이 있으면 Claude가 스킬 본문(5가지 절차)을 읽고 그대로 따릅니다.
+- 직접 부르고 싶으면 `/mi-sonar:mi-sonar` 라고 치면 됩니다. OpenCode는 `~/.claude/skills/mi-sonar`를 자동으로 읽습니다.
 
 Claude가 쓴 SQL은 답변에 같이 나옵니다. 읽기전용 계정이라 데이터는 바뀌지 않습니다.
 
