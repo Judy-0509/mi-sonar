@@ -83,3 +83,81 @@ def file_sha256(path: Path) -> str:
         for block in iter(lambda: f.read(1 << 20), b""):
             h.update(block)
     return h.hexdigest()
+
+
+# ---------- text cleanup (pure functions on page strings) ----------
+
+CUT_RE = re.compile(r"^[ \t]*(analyst certification|important disclosures)\b", re.I | re.M)
+PAGE_NO_RE = re.compile(r"^\s*\d{1,4}\s*$")
+BULLET_RE = re.compile(r"^([•●▪■◦·*\-–]|\d{1,2}[.)])\s")
+PARA_END = (".", ":", "?", "!")
+URL_RE = re.compile(r"https?://|www\.", re.I)
+SMARTPHONE_WORDS = ("smartphone", "handset", "iphone", "galaxy", "pixel", "snapdragon",
+                    "exynos", "dimensity", "mediatek", "shipments", "sell-through", "units")
+
+
+def _norm(line: str) -> str:
+    return " ".join(line.split())
+
+
+def strip_repeated_lines(pages: list[str], threshold: float = 0.6) -> list[str]:
+    """Drop header/footer lines found on >= threshold of the pages (only for 3+ pages)."""
+    if len(pages) < 3:
+        return pages
+    seen = Counter(k for page in pages for k in {_norm(line) for line in page.splitlines()} if k)
+    drop = {k for k, n in seen.items() if n >= threshold * len(pages)}
+    return ["\n".join(line for line in page.splitlines() if _norm(line) not in drop) for page in pages]
+
+
+def cut_disclosure(pages: list[str]) -> tuple[list[str], str | None]:
+    """Cut everything from the first `Analyst Certification` / `Important Disclosures` line on page 2+."""
+    for i, page in enumerate(pages[1:], 1):  # page 1 often says "see important disclosures": never cut there
+        m = CUT_RE.search(page)
+        if m:
+            head = page[:m.start()].strip()
+            return pages[:i] + ([head] if head else []), m.group(1)
+    return pages, None
+
+
+def strip_page_numbers(page: str) -> str:
+    return "\n".join(line for line in page.splitlines() if not PAGE_NO_RE.match(line))
+
+
+def join_wraps(text: str) -> str:
+    """Re-join hard-wrapped lines: one paragraph per line. A paragraph ends after a line ending in
+    . : ? ! and before a bullet line; a line ending in '-' joins the next without a space."""
+    paras: list[str] = []
+    cur = ""
+    for raw in text.splitlines():
+        line = _norm(raw)
+        if cur and (not line or BULLET_RE.match(line)):
+            paras.append(cur)
+            cur = ""
+        if not line:
+            continue
+        cur = cur + line if cur.endswith("-") else f"{cur} {line}".strip()
+        if cur.endswith(PARA_END):
+            paras.append(cur)
+            cur = ""
+    if cur:
+        paras.append(cur)
+    return "\n".join(paras)
+
+
+def render_body(pages: list[str]) -> str:
+    """Cleaned pages -> one text with a `[p.N]` line before each non-empty page (N = PDF page number)."""
+    out = []
+    for n, page in enumerate(pages, 1):
+        text = join_wraps(strip_page_numbers(unicodedata.normalize("NFKC", page)))  # NFKC: ligatures like ﬁ -> fi
+        if text:
+            out.append(f"[p.{n}]\n{text}")
+    return "\n".join(out) + "\n" if out else ""
+
+
+def url_count(text: str) -> int:
+    return len(URL_RE.findall(text))
+
+
+def smartphone_hits(text: str) -> int:
+    low = text.lower()
+    return sum(low.count(w) for w in SMARTPHONE_WORDS)
