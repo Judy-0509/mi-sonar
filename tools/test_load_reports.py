@@ -317,3 +317,103 @@ def test_triage_report(staging, capsys):
     assert "## 적재 (2)" in md and "## 제외 (1)" in md and "## 미분류·오류 (2)" in md
     assert "서버 전용" in md and "적재 (수동)" in md and "triage.json 없음" in md
     assert "적재 2" in capsys.readouterr().out
+
+
+# ---------- load ----------
+
+def test_build_row_joins_fields():
+    row = lr.build_row(META, GOOD_TRIAGE, GOOD_ANNOTATE, "[p.1]\nbody\n")
+    assert row["summary"] == "\n".join(GOOD_ANNOTATE["summary_ko"]) + "\n" + GOOD_ANNOTATE["summary_en"]
+    assert row["keywords"] == "HBM, 모바일 DRAM, HBM, mobile DRAM, LPDDR5X"
+    assert row["topics"] == "메모리, 스마트폰" and row["report_type"] == "company_update"
+    assert row["minio_key"] == ("reports/JPMorgan/2026-10-06_Micron_Technology_Mgmt_Meeting_CY27_and_CY28_"
+                                "Both_Significan_a1b2c3.pdf")
+    assert (row["ticker"], row["market"], row["body_loaded"]) == ("MU", "USQ", True)
+    assert set(row) == set(lr.COLUMNS)
+
+
+def test_minio_client_parses_and_rejects():
+    client, bucket = lr.minio_client("http://AK:p%40ss@minio.local:9000/mi-reports")
+    assert bucket == "mi-reports"
+    with pytest.raises(lr.LoaderError) as e:
+        lr.minio_client("http://minio.local:9000/mi-reports")
+    assert e.value.code == 2
+
+
+def test_load_requires_minio_env_unless_no_minio(staging, monkeypatch, capsys):
+    monkeypatch.delenv("MI_MINIO_WRITE", raising=False)
+    monkeypatch.setenv("MI_DB_REPORTS_WRITE", "postgresql://u:p@127.0.0.1:1/db")
+    assert lr.main(["--staging", str(staging), "load", "--dsn-env", "MI_DB_REPORTS_WRITE"]) == 2
+    assert "--no-minio" in capsys.readouterr().err
+
+
+def test_load_never_prints_secrets_on_connect_failure(staging, monkeypatch, capsys):
+    monkeypatch.setenv("MI_DB_REPORTS_WRITE", "postgresql://writer:SECRETPW@127.0.0.1:1/db")
+    assert lr.main(["--staging", str(staging), "load", "--dsn-env", "MI_DB_REPORTS_WRITE", "--no-minio"]) == 1
+    cap = capsys.readouterr()
+    assert "SECRETPW" not in cap.out + cap.err and "[load_reports]" in cap.err
+
+
+class FakeMinio:
+    def __init__(self):
+        self.put = []
+
+    def fput_object(self, bucket, key, path, content_type=None):
+        self.put.append((bucket, key, path, content_type))
+
+
+@pytest.fixture(scope="module")
+def srv(tmp_path_factory):
+    pgserver = pytest.importorskip("pgserver")
+    import psycopg
+
+    with pgserver.get_server(tmp_path_factory.mktemp("pgdata")) as s:
+        with psycopg.connect(s.get_uri(), autocommit=True) as c:
+            c.execute(lr.DDL)  # stands in for the DBaaS team creating the table
+            c.execute("CREATE DATABASE empty_db")
+        yield s
+
+
+def test_load_dsn_env_uploads_once_and_skips_existing(srv, staging, monkeypatch, capsys):
+    import psycopg
+
+    fake = FakeMinio()
+    monkeypatch.setattr(lr, "minio_client", lambda url: (fake, "mi-reports"))
+    monkeypatch.setenv("MI_DB_REPORTS_WRITE", srv.get_uri())
+    monkeypatch.setenv("MI_MINIO_WRITE", "http://AK:S%40CRET@minio.local:9000/mi-reports")
+    argv = ["--staging", str(staging), "load", "--dsn-env", "MI_DB_REPORTS_WRITE"]
+    assert lr.main(argv) == 1  # cccccccccccc waits for annotate.json
+    out = capsys.readouterr().out
+    assert "loaded aaaaaaaaaaaa" in out and "wait cccccccccccc" in out
+    assert "S@CRET" not in out and "S%40CRET" not in out
+    assert [p[1] for p in fake.put] == ["reports/JPMorgan/2026-10-06_Micron_Technology_Mgmt_Meeting_CY27_and_"
+                                        "CY28_Both_Significan_aaaaaa.pdf"]
+    meta = json.loads((staging / "aaaaaaaaaaaa" / "meta.json").read_text(encoding="utf-8"))
+    assert "MI_DB_REPORTS_WRITE" in meta["loaded"]
+    assert lr.main(argv) == 1
+    assert "exists aaaaaaaaaaaa" in capsys.readouterr().out and len(fake.put) == 1
+    with psycopg.connect(srv.get_uri()) as c:
+        rows = c.execute(f"SELECT firm, title, keywords, body, body_loaded FROM {lr.TABLE}").fetchall()
+    assert rows == [("JPMorgan", GOOD_ANNOTATE["title"], "HBM, 모바일 DRAM, HBM, mobile DRAM, LPDDR5X",
+                     "[p.1]\nBody of aaaaaaaaaaaa.\n", True)]
+
+
+def test_load_dsn_env_refuses_missing_table(srv, staging, monkeypatch, capsys):
+    monkeypatch.setenv("MI_DB_REPORTS_WRITE", srv.get_uri("empty_db"))
+    assert lr.main(["--staging", str(staging), "load", "--dsn-env", "MI_DB_REPORTS_WRITE", "--no-minio"]) == 1
+    assert "DBaaS" in capsys.readouterr().err
+
+
+def test_load_local_creates_table_and_accumulates(staging, capsys):
+    pgserver = pytest.importorskip("pgserver")
+    import psycopg
+
+    (staging / "cccccccccccc" / "triage.json").write_text(json.dumps({**GOOD_TRIAGE, "relevance": "low"}),
+                                                           encoding="utf-8")
+    argv = ["--staging", str(staging), "load", "--local"]
+    assert lr.main(argv) == 0
+    assert "MinIO 건너뜀" in capsys.readouterr().out
+    assert lr.main(argv) == 0
+    assert "exists aaaaaaaaaaaa" in capsys.readouterr().out
+    with pgserver.get_server(staging / "localpg") as s, psycopg.connect(s.get_uri()) as c:
+        assert c.execute(f"SELECT count(*) FROM {lr.TABLE}").fetchone()[0] == 1

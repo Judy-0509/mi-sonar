@@ -408,6 +408,134 @@ def cmd_triage_report(staging: Path) -> int:
     return 0
 
 
+# ---------- load ----------
+
+DDL = """
+CREATE SCHEMA IF NOT EXISTS sales_team;
+CREATE TABLE IF NOT EXISTS sales_team.nasdaq_report_doc (
+  id SERIAL PRIMARY KEY,
+  firm VARCHAR(100) NOT NULL,
+  published_on DATE NOT NULL,
+  title VARCHAR(300) NOT NULL,
+  report_type VARCHAR(50),
+  topics VARCHAR(300),
+  analyst VARCHAR(100),
+  pages INTEGER,
+  minio_key VARCHAR(500) NOT NULL,
+  file_sha256 VARCHAR(64) NOT NULL UNIQUE,
+  summary TEXT,
+  keywords VARCHAR(500),
+  key_numbers TEXT,
+  body TEXT,
+  body_loaded BOOLEAN NOT NULL DEFAULT FALSE,
+  loaded_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  ticker VARCHAR(20),
+  market VARCHAR(10)
+);
+"""
+COLUMNS = ("firm", "published_on", "title", "report_type", "topics", "analyst", "pages", "minio_key",
+           "file_sha256", "summary", "keywords", "key_numbers", "body", "body_loaded", "ticker", "market")
+INSERT = (f"INSERT INTO {TABLE} ({', '.join(COLUMNS)}) "
+          f"VALUES ({', '.join(f'%({c})s' for c in COLUMNS)})")
+
+
+def slug(text: str) -> str:
+    return re.sub(r"[^A-Za-z0-9]+", "_", text).strip("_")
+
+
+def build_row(meta: dict, triage: dict, ann: dict, body: str) -> dict:
+    title = ann.get("title") or meta["title"]
+    name = "_".join(x for x in (meta["published_on"], slug(title)[:60].strip("_"), meta["id"][:6]) if x)
+    return {
+        "firm": meta["firm"],
+        "published_on": date.fromisoformat(meta["published_on"]),
+        "title": title,
+        "report_type": triage["kind"],
+        "topics": ", ".join(ann["topics"]),
+        "analyst": ann.get("analyst"),
+        "pages": meta["pages"],
+        "minio_key": f"reports/{slug(meta['firm'])}/{name}.pdf",
+        "file_sha256": meta["file_sha256"],
+        "summary": "\n".join(ann["summary_ko"]) + "\n" + ann["summary_en"],
+        "keywords": ", ".join(ann["keywords_ko"] + ann["keywords_en"]),
+        "key_numbers": ann["key_numbers"] or None,
+        "body": body,
+        "body_loaded": True,
+        "ticker": ann.get("ticker") or meta["ticker"],
+        "market": meta["market"],
+    }
+
+
+def minio_client(url: str):
+    """(client, bucket) from http(s)://ACCESS:SECRET@host:port/bucket, the same format as MI_MINIO."""
+    from minio import Minio
+
+    u = urlparse(url)
+    bucket = u.path.strip("/")
+    if u.scheme not in ("http", "https") or not (u.username and u.password and u.hostname and bucket):
+        raise LoaderError(f"{MINIO_ENV} 형식은 http(s)://ACCESS:SECRET@host:port/bucket 이어야 합니다.", 2)
+    endpoint = u.hostname + (f":{u.port}" if u.port else "")
+    client = Minio(endpoint, access_key=unquote(u.username), secret_key=unquote(u.password),
+                   secure=u.scheme == "https")
+    return client, bucket
+
+
+def load_all(staging: Path, dsn: str, target: str, create: bool, minio_url: str) -> int:
+    import psycopg
+
+    mc = minio_client(minio_url) if minio_url else None
+    counts = Counter()
+    with psycopg.connect(dsn, connect_timeout=10, autocommit=True) as conn:
+        if create:
+            conn.execute(DDL)
+        elif conn.execute("SELECT to_regclass(%s)", (TABLE,)).fetchone()[0] is None:
+            raise LoaderError(f"{TABLE} 테이블이 아직 없습니다 (DBaaS 팀 생성 대기). 그동안은 --local 로 쌓으세요.", 1)
+        for s in all_states(staging):
+            if not s["load"]:
+                continue
+            if s["annotate"] is None or s["a_err"]:
+                counts["wait"] += 1
+                print(f"wait {s['id']} annotate.json {'오류' if s['a_err'] else '없음'} (status 로 확인)")
+                continue
+            m = s["meta"]
+            try:
+                row = build_row(m, s["triage"], s["annotate"], (s["dir"] / "text.txt").read_text(encoding="utf-8"))
+                with conn.transaction():  # one report = one transaction
+                    if conn.execute(f"SELECT 1 FROM {TABLE} WHERE file_sha256 = %s", (m["file_sha256"],)).fetchone():
+                        result = "exists"
+                    else:
+                        if mc:
+                            mc[0].fput_object(mc[1], row["minio_key"], m["source_path"], content_type="application/pdf")
+                        conn.execute(INSERT, row)
+                        result = "loaded"
+            except Exception as e:  # report the failure, keep going with the next report
+                counts["fail"] += 1
+                print(f"FAIL {s['id']}: {type(e).__name__}: {redact(redact(str(e), dsn), minio_url)}")
+                continue
+            counts[result] += 1
+            m.setdefault("loaded", {})[target] = datetime.now().isoformat(timespec="seconds")
+            write_json(s["dir"] / "meta.json", m)
+            print(f"{result:<6} {s['id']} {row['minio_key']}")
+    print(f"({target}: 적재 {counts['loaded']}, 이미 있음 {counts['exists']}, 주석 대기 {counts['wait']}, "
+          f"실패 {counts['fail']}, MinIO {'업로드' if mc else '건너뜀'})")
+    return 1 if counts["wait"] or counts["fail"] else 0
+
+
+def cmd_load(staging: Path, local: bool, dsn_env: str | None, no_minio: bool) -> int:
+    minio_url = "" if local or no_minio else os.environ.get(MINIO_ENV, "")
+    if not (local or no_minio or minio_url):
+        raise LoaderError(f"환경변수 {MINIO_ENV} 가 없습니다 (MinIO 없이 적재하려면 --no-minio).", 2)
+    if local:
+        import pgserver
+
+        with pgserver.get_server(staging / "localpg") as srv:  # stops on exit, data stays in staging/localpg
+            return load_all(staging, srv.get_uri(), "local", True, "")
+    dsn = os.environ.get(dsn_env, "")
+    if not dsn:
+        raise LoaderError(f"환경변수 {dsn_env} 가 설정되지 않았습니다 (이 터미널에서만 설정하세요).", 2)
+    return load_all(staging, dsn, dsn_env, False, minio_url)
+
+
 # ---------- CLI ----------
 
 def main(argv: list[str] | None = None) -> int:
@@ -424,12 +552,19 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--force", action="store_true", help="이미 추출된 것도 다시 추출")
     sub.add_parser("status", help="레포트별 단계 상태 한 줄씩")
     sub.add_parser("triage-report", help="staging/triage.md 생성")
+    s = sub.add_parser("load", help="적재 대상을 DB(+MinIO)에 넣기")
+    g = s.add_mutually_exclusive_group(required=True)
+    g.add_argument("--local", action="store_true", help="staging/localpg 내장 PostgreSQL (MinIO 안 씀)")
+    g.add_argument("--dsn-env", help="쓰기 DSN이 든 환경변수 이름 (예: MI_DB_REPORTS_WRITE)")
+    s.add_argument("--no-minio", action="store_true", help="MinIO 업로드 건너뛰기")
     a = p.parse_args(argv)
     try:
         if a.cmd == "status":
             return cmd_status(a.staging)
         if a.cmd == "triage-report":
             return cmd_triage_report(a.staging)
+        if a.cmd == "load":
+            return cmd_load(a.staging, a.local, a.dsn_env, a.no_minio)
         return cmd_extract(a.staging, a.paths, a.force)
     except LoaderError as e:
         print(f"[load_reports] {e}", file=sys.stderr)
