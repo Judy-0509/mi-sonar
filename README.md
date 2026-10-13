@@ -52,3 +52,8 @@ Claude가 쓴 SQL은 답변에 같이 나옵니다. 읽기전용 계정이라 �
 ## 소유자: 소스 추가
 
 `sources/<이름>.md` 하나 + `install.ps1`의 `$EnvVars` 한 줄. 자세한 내용은 `SKILL.md` 끝 부분.
+
+## 소유자: DB 상황 확인
+
+새 테이블을 설계하기 전에 사내 PC에서 `tools/db_check.py` 를 한 번 실행해 DBaaS 계정으로 무엇을 할 수 있는지 확인합니다 (모든 변경은 롤백).
+절차, 사용할 계정, 결과 해석은 `docs/handoff/db-capability-check.md` 에 있습니다.

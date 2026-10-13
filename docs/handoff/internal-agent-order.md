@@ -8,6 +8,11 @@ already built and tested. Do the following in order; stop and report if any step
 - `python --version` >= 3.10, `git --version`, `pip install -r requirements-dev.txt`
 - `python -m pytest scripts -q` -> all tests pass before you change anything.
 
+## 0b. DB capability check (do this before section 1)
+- Follow `docs/handoff/db-capability-check.md`: run `python tools/db_check.py --table smartphone_market_data --out db_check_report.md`
+  with the owner account in `MI_DB_CHECK` (current shell only). It changes nothing; everything is rolled back.
+- Attach the whole `db_check_report.md` to your report, plus the DBaaS team's answers to every question in its `## 10. 판정`.
+
 ## 1. Fill placeholders (grep for `__` to find them all)
 | File | Placeholder | Replace with |
 |---|---|---|
