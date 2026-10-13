@@ -104,6 +104,87 @@ SELECT period, vendor, SUM(sell_in_mu) AS sell_in_mu, SUM(revenue_musd) AS reven
 FROM latest GROUP BY period, vendor ORDER BY period, vendor
 ```
 
+## 자료(슬라이드)용 집계
+
+### 지역 구분 (5개)
+
+| 지역 | 국가 (country 값) |
+|---|---|
+| 북미 | United States, USA, US, Canada |
+| 유럽 | Germany, France, United Kingdom, UK, Italy, Spain, Netherlands, Sweden, Poland, Switzerland, Western Europe, Eastern Europe, Europe |
+| 중국 | China |
+| 아시아(중국 제외) | Japan, South Korea, Korea, India, Taiwan, Indonesia, Vietnam, Thailand, Philippines, Malaysia, Australia, Asia Pacific, APAC |
+| 기타 | 위에 없는 모든 국가 (Latin America, Brazil, Mexico, Middle East, Africa, MEA, Rest of World 포함) |
+
+쿼리에 붙여 쓰는 CASE:
+
+```sql
+CASE
+  WHEN country IN ('United States', 'USA', 'US', 'Canada') THEN '북미'
+  WHEN country IN ('Germany', 'France', 'United Kingdom', 'UK', 'Italy', 'Spain', 'Netherlands', 'Sweden', 'Poland', 'Switzerland', 'Western Europe', 'Eastern Europe', 'Europe') THEN '유럽'
+  WHEN country = 'China' THEN '중국'
+  WHEN country IN ('Japan', 'South Korea', 'Korea', 'India', 'Taiwan', 'Indonesia', 'Vietnam', 'Thailand', 'Philippines', 'Malaysia', 'Australia', 'Asia Pacific', 'APAC') THEN '아시아(중국 제외)'
+  ELSE '기타'
+END
+```
+
+규칙: 국가명은 위 표의 TechInsights 표기와 정확히 일치해야 한다. 사내 에이전트는 적재 1회당 '기타'로 떨어졌지만 기타 목록에 없는 국가를 나열하고, 표 확장은 담당자가 한다. 지역을 추측해서 배정하지 않는다.
+
+### 우리 TAM 연간 (vendor별)
+
+```sql
+WITH latest AS (
+  SELECT DISTINCT ON (period, vendor) period, vendor, sell_in_mu
+  FROM sales_team.smartwatch_market_data
+  WHERE dataset = 'our_tam' AND country = 'Worldwide' AND firm = 'MI'
+  ORDER BY period, vendor, published_month DESC
+)
+SELECT LEFT(period, 4) AS year, vendor, SUM(sell_in_mu) AS tam_mu, COUNT(*) AS quarters
+FROM latest
+WHERE LEFT(period, 4) BETWEEN '2025' AND '2031'
+GROUP BY 1, 2 ORDER BY 1, 2
+```
+
+`quarters` 가 4 가 아닌 연도는 일부 분기만 있는 값이므로 답변에 그 사실을 반드시 밝힌다.
+
+### 지역별 판매 비중 + 전년比 (YTD)
+
+아래 SQL 의 연도 리터럴 `'2026'` 은 올해로 바꿔 쓴다 (전년은 `'2025'`). 올해 데이터가 있는 분기만, 전년 같은 분기 번호와 비교한다.
+
+```sql
+WITH latest AS (
+  SELECT DISTINCT ON (period, country, vendor) period, country, sell_in_mu
+  FROM sales_team.smartwatch_market_data
+  WHERE dataset = 'actual' AND LEFT(period, 4) IN ('2025', '2026')
+  ORDER BY period, country, vendor, published_month DESC
+), qs AS (
+  SELECT DISTINCT RIGHT(period, 2) AS qn FROM latest WHERE LEFT(period, 4) = '2026'
+), reg AS (
+  SELECT LEFT(period, 4) AS yr, sell_in_mu,
+         CASE
+           WHEN country IN ('United States', 'USA', 'US', 'Canada') THEN '북미'
+           WHEN country IN ('Germany', 'France', 'United Kingdom', 'UK', 'Italy', 'Spain', 'Netherlands', 'Sweden', 'Poland', 'Switzerland', 'Western Europe', 'Eastern Europe', 'Europe') THEN '유럽'
+           WHEN country = 'China' THEN '중국'
+           WHEN country IN ('Japan', 'South Korea', 'Korea', 'India', 'Taiwan', 'Indonesia', 'Vietnam', 'Thailand', 'Philippines', 'Malaysia', 'Australia', 'Asia Pacific', 'APAC') THEN '아시아(중국 제외)'
+           ELSE '기타'
+         END AS region
+  FROM latest
+  WHERE RIGHT(period, 2) IN (SELECT qn FROM qs)
+)
+SELECT region AS "지역",
+       SUM(sell_in_mu) FILTER (WHERE yr = '2026') AS this_year_mu,
+       SUM(sell_in_mu) FILTER (WHERE yr = '2025') AS last_year_mu,
+       ROUND(100.0 * SUM(sell_in_mu) FILTER (WHERE yr = '2026')
+             / SUM(SUM(sell_in_mu) FILTER (WHERE yr = '2026')) OVER (), 1) AS share_pct,
+       ROUND(100.0 * (SUM(sell_in_mu) FILTER (WHERE yr = '2026') - SUM(sell_in_mu) FILTER (WHERE yr = '2025'))
+             / NULLIF(SUM(sell_in_mu) FILTER (WHERE yr = '2025'), 0), 1) AS yoy_pct
+FROM reg GROUP BY region ORDER BY this_year_mu DESC
+```
+
+### 그래프 색
+
+그래프용 vendor 색 = Apple navy #0f1e3b, Samsung #2c57cd, Huawei #407aea, Garmin #87bafd, Fitbit #2342a3, Others #9aa8bd (`docs/design/shadcn-navy-theme.css` 기준).
+
 ## 주의사항
 
 - 테이블은 DBaaS 팀에 생성 요청 중이며, 생성 전에는 `schema` 명령이 테이블을 찾지 못한다.
