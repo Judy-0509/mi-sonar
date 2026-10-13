@@ -1,6 +1,6 @@
 ---
 name: mi-sonar
-description: 스마트폰 시장 데이터(smartphone_market_data) 조회·집계·추세 분석과 MinIO 원본 파일 다운로드, 증권사 레포트(브로커 리서치) 검색·요약. "출하량", "점유율", "판매량", "성장률", "YoY", "모델별/분기별 수치", "제조사", "브랜드", "모델", "갤럭시", "아이폰", "분기", "조사기관", "market share", "shipments", "시장 데이터", "원본 파일", "mi-sonar 설치 확인", "증권사 레포트", "리포트", "애널리스트", "broker report" 같은 요청에 사용. 모든 DB 접근은 scripts/query.py 로만 한다.
+description: 스마트폰 시장 데이터(smartphone_market_data) 조회·집계·추세 분석과 MinIO 원본 파일 다운로드, 증권사 레포트(브로커 리서치) 검색·요약. "출하량", "점유율", "판매량", "성장률", "YoY", "모델별/분기별 수치", "제조사", "브랜드", "모델", "갤럭시", "아이폰", "분기", "조사기관", "market share", "shipments", "시장 데이터", "원본 파일", "mi-sonar 설치 확인", "증권사 레포트", "리포트", "애널리스트", "broker report", "스마트워치 TAM", "워치 TAM 점검", "smartwatch TAM" 같은 요청에 사용. 모든 DB 접근은 scripts/query.py 로만 한다.
 ---
 
 # mi-sonar
@@ -63,6 +63,23 @@ SQL은 큰따옴표로 감싸고, SQL 안의 문자열 리터럴은 작은따옴
 2. **본문 위치**: 좁힌 `id` 안에서 `body ILIKE '%영어 단어%'`. 본문은 영어 원문이므로 질문 단어를 영어로 바꿔 찾는다.
 3. **읽기**: 필요한 레포트의 `body` 를 한 건씩 가져와 끝까지 읽고 한국어로 답한다. 본문에 없는 내용은 지어내지 않는다.
 4. **출처**: 근거마다 `(증권사, 발행일, 제목, [p.N])` 를 붙인다. `[p.N]` 은 본문 속 페이지 표시 그대로다.
+
+## 스마트워치 TAM 점검 (소스 `smartwatch`)
+
+"스마트워치 TAM", "워치 TAM 점검", "smartwatch TAM" 요청. 컬럼·패턴은 `sources/smartwatch.md`. 모든 SQL 에 `dataset` 조건을 넣는다.
+
+0. **표 확인**: `smartwatch` 쿼리가 "relation ... does not exist" 로 실패하면 "테이블 미생성" 이라고 안내하고 멈춘다 (재시도·추측 금지, 레포트 단계와 같은 규칙).
+1. **최신 발행월**: `sql smartwatch "SELECT dataset, published_month FROM sales_team.smartwatch_market_data GROUP BY dataset, published_month ORDER BY dataset, published_month DESC"` 로 `dataset` 별 최신 발행월과 직전 발행월을 구해 답에 두 값을 명시한다.
+2. **갱신 분기** (최신 발행월이 직전 점검 이후): 표 2개.
+   - (가) 업체별 최신 실적 vs 우리 TAM: 같은 분기, Worldwide 합계는 실적 국가 합산. 차이·차이율을 보이고 ±5% 초과는 "변경 후보" 로 표시.
+     `WITH a AS (SELECT DISTINCT ON (period, country, vendor) period, country, vendor, sell_in_mu FROM sales_team.smartwatch_market_data WHERE dataset = 'actual' AND period = '2026Q3' ORDER BY period, country, vendor, published_month DESC), t AS (SELECT DISTINCT ON (period, vendor) period, vendor, sell_in_mu FROM sales_team.smartwatch_market_data WHERE dataset = 'our_tam' AND period = '2026Q3' ORDER BY period, vendor, published_month DESC) SELECT t.vendor, SUM(a.sell_in_mu) AS actual_mu, t.sell_in_mu AS tam_mu, SUM(a.sell_in_mu) - t.sell_in_mu AS diff_mu, ROUND(100.0 * (SUM(a.sell_in_mu) - t.sell_in_mu) / NULLIF(t.sell_in_mu, 0), 1) AS diff_pct FROM t JOIN a ON a.vendor = t.vendor GROUP BY t.vendor, t.sell_in_mu ORDER BY t.vendor`
+   - (나) 연간 전망(`dataset = 'forecast'`)의 직전 발행월 대비 업체별 변화: `sources/smartwatch.md` 의 "두 발행월 비교" 패턴에서 `dataset = 'forecast'`, `period` 를 연도로 바꿔 쓴다.
+3. **미갱신 분기**: 숫자는 바꾸지 않는다.
+   - (가) `reports` 소스에서 직전 점검 이후 `firm = 'TechInsights' AND report_type = 'firm_analysis'` 기사와 `topics ILIKE '%스마트워치%'` 증권사 레포트를 찾아 요약과 핵심 숫자를 인용한다 (레포트 찾기 규칙 그대로).
+   - (나) 사용자가 외부 보도자료(Counterpoint Insights, Omdia PR, IDC 헤드라인)를 붙여주면 **증감 방향과 이유만** 메모한다. 집계 범위가 달라 TechInsights 숫자와 섞지 않는다.
+   - (다) 끝에 "다음 갱신 시 반영 검토" 목록을 붙인다.
+4. **출력**: 표 2개 + 특이사항 bullet (출처: 증권사·발행일·`[p.N]`) + 반영 검토 목록. PPT 채우기는 별도 단계이며 아직 없다.
+5. **TAM 변경은 사용자가 결정한다.** 변경 시 `our_tam` 새 발행월 행을 CSV 로 만들어 소유자가 `tools/load_smartwatch.py load` 로 적재하며 `note` 에 근거를 적는다. 에이전트는 DB 에 쓰지 않는다.
 
 ## 제약 (스크립트가 강제함)
 
