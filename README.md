@@ -1,8 +1,24 @@
-![mi-sonar](assets/banner.png)
+<p align="center"><img src="assets/banner.png" alt="mi-sonar" width="100%"></p>
 
-# mi-sonar
+<p align="center">Claude Code / OpenCode에서 스마트폰 시장 데이터를 말로 물어보세요.</p>
 
-Claude Code / OpenCode에서 스마트폰 시장 데이터를 말로 물어보세요.
+<p align="center">
+  <img alt="python" src="https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white">
+  <img alt="postgres" src="https://img.shields.io/badge/postgres-read--only-336791?logo=postgresql&logoColor=white">
+  <img alt="minio" src="https://img.shields.io/badge/storage-minio-C72C48?logo=minio&logoColor=white">
+  <img alt="agent" src="https://img.shields.io/badge/agent-claude%20code%20%C2%B7%20opencode-D97757">
+  <img alt="tests" src="https://img.shields.io/badge/tests-48%20passing-4C1">
+</p>
+
+<p align="center"><sub>🏆 <b>WANT</b> — 받고 싶은 상 (아직 하나도 못 받음)</sub></p>
+
+<p align="center">
+  <img alt="want" src="https://img.shields.io/badge/WANT-GitHub%20Trending%20%231-ff69b4">
+  <img alt="want" src="https://img.shields.io/badge/WANT-Best%20Repo%20of%202026-gold">
+  <img alt="want" src="https://img.shields.io/badge/WANT-10k%20stars%20(%ED%98%84%EC%9E%AC%201)-yellow">
+  <img alt="want" src="https://img.shields.io/badge/WANT-%EC%98%AC%ED%95%B4%EC%9D%98%20%EC%82%AC%EB%82%B4%20%ED%88%B4-8A2BE2">
+  <img alt="want" src="https://img.shields.io/badge/WANT-%ED%8C%80%EC%9E%A5%EB%8B%98%20%EC%B9%AD%EC%B0%AC%201%ED%9A%8C-2ea44f">
+</p>
 
 ## 설치: 아래 상자를 복사해서 Claude Code 또는 OpenCode에 그대로 붙여넣으세요
 

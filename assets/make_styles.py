@@ -194,6 +194,26 @@ def s3():
     return c.save("s3_supabase.png")
 
 
+def banner():
+    W, H = 1280, 300
+    c = Canvas(W, H, "#0A0A0A")
+    for gx in range(0, W, 24):
+        for gy in range(0, H, 24):
+            c.rect(gx, gy, gx + 1, gy + 1, "#1F1F1F")
+    for r, col in ((280, "#1A1A1A"), (200, "#212121"), (120, "#262626")):
+        c.circ(1180, H // 2, r, outline=col, width=1)
+    f = font("segoeuib.ttf", 64)
+    gap = 24
+    ix = (W - (72 + gap + c.width(NAME, f))) // 2
+    iy = (H - 72) // 2
+    c.rr(ix, iy, ix + 72, iy + 72, 16, fill="#3ECF8E")
+    sonar_glyph(c, ix, iy, 72)
+    c.text(ix + 72 + gap, iy + 72, NAME, f, "#FFFFFF")
+    p = os.path.join(os.path.dirname(OUT), "banner.png")
+    c.img.resize((W, H), Image.LANCZOS).save(p)
+    return p, (W, H)
+
+
 # 4 -------------------------------------------------------------------------
 def s4():
     c = Canvas(1280, 400, "#FAFAF7")
