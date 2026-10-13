@@ -502,3 +502,16 @@ def test_triage_json_with_bom_is_read(tmp_path, capsys):
     (d / "triage.json").write_text(json.dumps(GOOD_TRIAGE), encoding="utf-8-sig")
     assert lr.main(["--staging", str(st), "status"]) == 0
     assert "ERR" not in capsys.readouterr().out
+
+
+def test_load_redacts_secret_inside_driver_exception(staging, monkeypatch, capsys):
+    import psycopg
+
+    def boom(*a, **k):
+        raise psycopg.OperationalError("connection failed: password=ZZsecretZZ host=x")
+
+    monkeypatch.setattr(psycopg, "connect", boom)
+    monkeypatch.setenv("MI_DB_REPORTS_WRITE", "postgresql://writer:ZZsecretZZ@127.0.0.1:1/db")
+    assert lr.main(["--staging", str(staging), "load", "--dsn-env", "MI_DB_REPORTS_WRITE", "--no-minio"]) == 1
+    cap = capsys.readouterr()
+    assert "ZZsecretZZ" not in cap.out + cap.err
