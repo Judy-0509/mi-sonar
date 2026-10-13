@@ -1,7 +1,7 @@
 # mi-sonar 설계 스펙
 
 작성일: 2026-10-13
-상태: 사용자 검토 대기
+상태: 승인됨 (2026-10-13), 리뷰 반영으로 §7 수정
 
 ## 1. 목적
 
@@ -96,10 +96,12 @@ summary: smartphone_market_data 원본 파일 저장소
   세미콜론은 끝에 하나만 허용.
 - 단어 경계 기준으로 `INSERT UPDATE DELETE DROP ALTER TRUNCATE GRANT REVOKE CREATE COPY` 포함 시 거부.
 - 연결을 읽기전용 트랜잭션으로 연다 (계정 권한과 이중 방어).
-- `statement_timeout` 30초.
+- `statement_timeout` 30초, `connect_timeout` 10초.
+- 명령과 소스 kind 불일치(sql/schema↔postgres, ls/fetch↔s3) 시 종료코드 1.
 - 행 제한: 기본 200, `--limit` 최대 5,000. 초과 시 잘라내고
   "결과가 잘렸습니다. SQL에서 집계하거나 --csv로 저장하세요" 안내.
 - 접속 정보는 환경변수에서만 읽음. 출력·오류 메시지에 비밀번호 노출 금지.
+  오류 출력에서 접속 문자열·비밀번호(원문과 URL 디코딩 값)를 `***` 로 마스킹.
 
 ### 오류 처리
 
@@ -126,18 +128,22 @@ frontmatter `description`에 트리거 키워드: 스마트폰 시장 데이터,
 README 최상단: 배너 이미지 → 바로 아래 복사 한 줄.
 
 ```powershell
-powershell -ExecutionPolicy Bypass -c "irm https://<사내GitHub>/<org>/mi-sonar/raw/main/install.ps1 | iex"
+git clone https://<사내GitHub>/<org>/mi-sonar "$HOME\.claude\skills\mi-sonar"; powershell -ExecutionPolicy Bypass -File "$HOME\.claude\skills\mi-sonar\install.ps1"
 ```
 
-`install.ps1`이 하는 일 (재실행 시 업데이트로 동작):
-1. `git clone` 또는 이미 있으면 `git pull` → `~/.claude/skills/mi-sonar`
-   (git 없으면 zip 다운로드로 대체)
-2. `pip install -r requirements.txt`
-3. `setx MI_DB_SMARTPHONE "..."`, `setx MI_MINIO "..."` (값은 스크립트에 내장).
+clone 우선 방식: `git` 필수, zip 대체 경로 없음. 업데이트는 뒤쪽 절반(`install.ps1` 실행)만 다시 실행한다.
+
+`install.ps1`이 하는 일 (클론된 폴더 안에서 실행, 재실행 시 업데이트로 동작):
+1. `git -C <스킬 폴더> pull --ff-only` (git clone으로 받은 폴더가 아니면 README의 한 줄을 다시 실행하라고 안내 후 중단)
+2. Python 3.10+ 확인(`python`, 없으면 `py -3`) 후 `pip install -r requirements.txt`
+3. `MI_DB_SMARTPHONE`, `MI_MINIO` 를 `[Environment]::SetEnvironmentVariable(..., 'User')` 로 등록 (값은 스크립트에 내장,
+   자리표시자가 하나라도 남아 있으면 아무것도 등록하지 않고 중단).
    사용자 수준 환경변수이므로 Claude Code와 OpenCode 모두 새 터미널에서 자동으로 읽는다.
-4. OpenCode 전역 스킬 폴더 `~/.config/opencode/skill/mi-sonar`에 정션(junction)을 만들어
-   같은 폴더가 양쪽 도구에 등록되게 한다.
-5. "새 터미널을 열고 Claude 또는 OpenCode에게 `mi-sonar 설치 확인해줘`라고 하세요" 출력
+4. 자가 점검: `import psycopg, minio` → `query.py sources`.
+   "새 터미널을 열고 Claude 또는 OpenCode에게 `mi-sonar 설치 확인해줘`라고 하세요" 출력
+
+OpenCode는 같은 폴더(~/.claude/skills)를 자동으로 읽으므로 별도 등록이 없다.
+모든 외부 명령(git, pip, python) 뒤에 종료코드를 확인해 실패하면 즉시 중단한다.
 
 README 나머지: 사용 예시 질문 5개, 문제 해결 3줄(환경변수 안 잡힘 → 터미널 재시작 등).
 

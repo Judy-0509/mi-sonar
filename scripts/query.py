@@ -40,7 +40,7 @@ def parse_front_matter(text: str) -> dict:
         if ":" not in line or line.lstrip().startswith("#"):
             continue
         key, _, val = line.partition(":")
-        val = val.strip()
+        val = val.split(" #", 1)[0].strip()
         if val.startswith("[") and val.endswith("]"):
             out[key.strip()] = [v.strip() for v in val[1:-1].split(",") if v.strip()]
         else:
@@ -51,7 +51,7 @@ def parse_front_matter(text: str) -> dict:
 def load_sources(dir: Path = SOURCES_DIR) -> dict[str, dict]:
     sources: dict[str, dict] = {}
     for p in sorted(Path(dir).glob("*.md")):
-        fm = parse_front_matter(p.read_text(encoding="utf-8"))
+        fm = parse_front_matter(p.read_text(encoding="utf-8-sig"))
         name = fm.get("name") or p.stem
         fm["name"] = name
         fm["path"] = p
@@ -127,7 +127,7 @@ def format_table(cols: list[str], rows: list[tuple]) -> str:
 def connect_pg(dsn: str):
     import psycopg  # lazy: `sources` and unit tests run without the driver
 
-    conn = psycopg.connect(dsn, options=f"-c statement_timeout={TIMEOUT_MS}", autocommit=False)
+    conn = psycopg.connect(dsn, connect_timeout=10, autocommit=False)
     conn.read_only = True
     return conn
 
@@ -143,6 +143,7 @@ def clamp_limit(n: int) -> tuple[int, str]:
 def run_sql(src: dict, sql: str, limit: int) -> tuple[list[str], list[tuple], bool]:
     stmt = check_sql(sql)
     with connect_pg(src["conn"]) as conn:
+        conn.execute(f"SET statement_timeout = {TIMEOUT_MS}")  # not a startup option: PgBouncer-safe
         with conn.cursor(name="mi_sonar") as cur:  # server-side cursor: never pulls the whole table
             cur.execute(stmt)
             rows = cur.fetchmany(limit + 1)
@@ -154,19 +155,22 @@ def run_sql(src: dict, sql: str, limit: int) -> tuple[list[str], list[tuple], bo
 def cmd_sql(src: dict, sql: str, limit: int, csv_path: Path | None) -> str:
     limit, notice = clamp_limit(limit)
     cols, rows, truncated = run_sql(src, sql, limit)
-    parts = [format_table(cols, rows), f"({len(rows)} rows)"]
+    parts = []
     if notice:
         parts.append(notice)
     if truncated:
         parts.append(
-            f"결과가 {limit}행에서 잘렸습니다. SQL에서 집계(GROUP BY)하거나 --limit/--csv 를 사용하세요."
+            f"결과가 {limit}행에서 잘렸습니다 (CSV도 같은 행 제한, 최대 {MAX_LIMIT}). "
+            "SQL에서 집계(GROUP BY)하거나 --limit 을 올리세요."
         )
     if csv_path:
         with open(csv_path, "w", newline="", encoding="utf-8-sig") as f:
             w = csv.writer(f)
             w.writerow(cols)
             w.writerows(rows)
-        parts.append(f"CSV 저장: {csv_path}")
+        parts += [format_table(cols, rows[:20]), f"(... CSV 파일에 {len(rows)}행 저장)", f"CSV 저장: {csv_path}"]
+    else:
+        parts += [format_table(cols, rows), f"({len(rows)} rows)"]
     return "\n".join(parts)
 
 
@@ -176,6 +180,7 @@ def cmd_schema(src: dict) -> str:
     tables = src.get("tables") or []
     out = []
     with connect_pg(src["conn"]) as conn:
+        conn.execute(f"SET statement_timeout = {TIMEOUT_MS}")
         with conn.cursor() as cur:
             if not tables:
                 cur.execute(
@@ -184,14 +189,19 @@ def cmd_schema(src: dict) -> str:
                 )
                 tables = [r[0] for r in cur.fetchall()]
             for t in tables:
+                parts = t.split(".")
+                where, params = "table_name=%s", [parts[-1]]
+                if len(parts) > 1:
+                    where += " AND table_schema=%s"
+                    params.append(parts[-2])
                 cur.execute(
                     "SELECT column_name, data_type, is_nullable FROM information_schema.columns "
-                    "WHERE table_name=%s ORDER BY ordinal_position",
-                    (t,),
+                    f"WHERE {where} ORDER BY ordinal_position",
+                    params,
                 )
                 cols = cur.fetchall()
                 out.append(f"## {t}\n" + format_table(["column", "type", "nullable"], cols))
-                cur.execute(pgsql.SQL("SELECT * FROM {} LIMIT 3").format(pgsql.Identifier(t)))
+                cur.execute(pgsql.SQL("SELECT * FROM {} LIMIT 3").format(pgsql.Identifier(*parts)))
                 sample = cur.fetchall()
                 out.append("샘플 3행:\n" + format_table([d.name for d in cur.description], sample))
     return "\n\n".join(out)
@@ -215,10 +225,14 @@ def parse_minio_url(url: str) -> dict:
 
 
 def connect_minio(url: str):
+    import urllib3  # ships with minio
     from minio import Minio
 
     c = parse_minio_url(url)
-    client = Minio(c["endpoint"], access_key=c["access"], secret_key=c["secret"], secure=c["secure"])
+    http = urllib3.PoolManager(timeout=urllib3.Timeout(connect=10, read=120), retries=urllib3.Retry(total=2))
+    client = Minio(
+        c["endpoint"], access_key=c["access"], secret_key=c["secret"], secure=c["secure"], http_client=http
+    )
     return client, c["bucket"]
 
 
@@ -227,9 +241,10 @@ def cmd_ls(src: dict, prefix: str) -> str:
     rows = []
     for obj in client.list_objects(bucket, prefix=prefix, recursive=True):
         rows.append((obj.object_name, obj.size, str(obj.last_modified)[:19]))
-        if len(rows) >= LS_MAX:
+        if len(rows) > LS_MAX:
             break
-    if len(rows) >= LS_MAX:
+    more, rows = len(rows) > LS_MAX, rows[:LS_MAX]
+    if more:
         tail = f"({len(rows)} objects, 최대 {LS_MAX}개까지만 표시. 접두어를 좁히세요)"
     else:
         tail = f"({len(rows)} objects)"
@@ -245,6 +260,21 @@ def cmd_fetch(src: dict, key: str, out: Path | None) -> str:
 
 
 # ---------- CLI ----------
+
+def redact(text: str, conn: str | None) -> str:
+    """Mask the conn string and its password (raw and URL-decoded) in an error message."""
+    secrets = [conn] if conn else []
+    try:
+        pw = urlparse(conn).password if conn else None
+    except ValueError:  # malformed URL: the whole conn is still masked
+        pw = None
+    if pw:
+        secrets += [pw, unquote(pw)]
+    for s in secrets:
+        if s:
+            text = text.replace(s, "***")
+    return text
+
 
 def cmd_sources(sources: dict) -> str:
     rows = []
@@ -279,11 +309,17 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("key")
     s.add_argument("--out", type=Path)
     a = p.parse_args(argv)
+    src = None
     try:
         if a.cmd == "sources":
             print(cmd_sources(load_sources()))
             return 0
         src = get_source(a.source)
+        need = "postgres" if a.cmd in ("schema", "sql") else "s3"
+        if src.get("kind") != need:
+            raise SonarError(
+                f"'{a.cmd}' 명령은 kind={need} 소스에만 쓸 수 있습니다 (소스 '{a.source}'는 kind={src.get('kind')})", 1
+            )
         if a.cmd == "schema":
             print(cmd_schema(src))
         elif a.cmd == "sql":
@@ -297,7 +333,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[mi-sonar] {e}", file=sys.stderr)
         return e.code
     except Exception as e:  # driver/network errors: class + message only, never the DSN
-        print(f"[mi-sonar] {type(e).__name__}: {e}", file=sys.stderr)
+        print(f"[mi-sonar] {type(e).__name__}: {redact(str(e), src and src['conn'])}", file=sys.stderr)
         return 1
 
 

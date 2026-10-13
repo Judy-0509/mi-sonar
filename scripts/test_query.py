@@ -33,6 +33,12 @@ def test_load_sources_reads_dir(tmp_path):
     assert src["x"]["path"] == tmp_path / "x.md"
 
 
+def test_parse_front_matter_inline_comment_and_bom(tmp_path):
+    (tmp_path / "x.md").write_text("---\nname: x\nenv: X_ENV   # note\n---\n", encoding="utf-8-sig")
+    assert (tmp_path / "x.md").read_bytes().startswith(b"\xef\xbb\xbf---")
+    assert q.load_sources(tmp_path)["x"]["env"] == "X_ENV"
+
+
 def test_get_source_requires_env(tmp_path, monkeypatch):
     (tmp_path / "x.md").write_text("---\nname: x\nkind: postgres\nenv: X_ENV\n---\n", encoding="utf-8")
     monkeypatch.delenv("X_ENV", raising=False)
@@ -123,6 +129,9 @@ class _FakeConn:
     def cursor(self, name=None):
         return _FakeCursor(list(self.rows), self.cols)
 
+    def execute(self, sql, params=None):
+        pass
+
     def close(self):
         self.closed = True
 
@@ -176,6 +185,32 @@ def test_cmd_sql_writes_csv_and_notes_truncation(monkeypatch, tmp_path):
     assert text.splitlines()[0] == "n,s" and len(text.splitlines()) == 3
 
 
+def test_cmd_sql_csv_prints_head_only(monkeypatch, tmp_path):
+    rows = [(i,) for i in range(50)]
+    monkeypatch.setattr(q, "connect_pg", lambda dsn: _FakeConn(rows, ["n"]))
+    out = q.cmd_sql({"conn": "x"}, "SELECT 1", limit=100, csv_path=tmp_path / "o.csv")
+    data_rows = [l for l in out.splitlines() if l.startswith("| ") and l not in ("| n |", "| --- |")]
+    assert len(data_rows) == 20 and "50행 저장" in out
+    assert len((tmp_path / "o.csv").read_text(encoding="utf-8-sig").splitlines()) == 51
+
+
+def test_truncation_notice_before_table(monkeypatch):
+    monkeypatch.setattr(q, "connect_pg", lambda dsn: _FakeConn([(i,) for i in range(5)], ["n"]))
+    lines = q.cmd_sql({"conn": "x"}, "SELECT 1", limit=2, csv_path=None).splitlines()
+    notice = next(i for i, l in enumerate(lines) if "잘렸습니다" in l)
+    assert notice < lines.index("| n |")
+
+
+def test_redact_masks_conn_and_password():
+    out = q.redact('bad "http://AK:p%40ss@h/b" and p@ss', "http://AK:p%40ss@h/b")
+    assert "p%40ss" not in out and "p@ss" not in out
+
+
+def test_connect_pg_kwargs():
+    src = Path(q.__file__).read_text(encoding="utf-8")
+    assert "connect_timeout=10" in src and "options=" not in src
+
+
 def test_parse_minio_url_decodes_secret():
     cfg = q.parse_minio_url("https://AK:p%40ss%2Fw%25rd@minio.corp:9000/mi-bucket")
     assert cfg == {
@@ -203,11 +238,11 @@ class _Obj:
 
 
 class _FakeMinio:
-    def __init__(self):
-        self.fetched = []
+    def __init__(self, n=300):
+        self.fetched, self.n = [], n
 
     def list_objects(self, bucket, prefix="", recursive=True):
-        for i in range(300):
+        for i in range(self.n):
             yield _Obj(f"{prefix}f{i}.pdf", i)
 
     def fget_object(self, bucket, key, path):
@@ -220,6 +255,14 @@ def test_cmd_ls_caps_at_200(monkeypatch):
     out = q.cmd_ls({"conn": "x"}, "2026/")
     assert "2026/f199.pdf" in out and "2026/f200.pdf" not in out
     assert "200" in out.splitlines()[-1]
+
+
+def test_cmd_ls_exactly_200_has_no_cap_notice(monkeypatch):
+    monkeypatch.setattr(q, "connect_minio", lambda url: (_FakeMinio(200), "b"))
+    assert "최대" not in q.cmd_ls({"conn": "x"}, "")
+    monkeypatch.setattr(q, "connect_minio", lambda url: (_FakeMinio(201), "b"))
+    out = q.cmd_ls({"conn": "x"}, "")
+    assert "최대" in out and "f200.pdf" not in out
 
 
 def test_cmd_fetch_default_out_is_basename(monkeypatch, tmp_path):
@@ -269,3 +312,8 @@ def test_cli_exit_codes():
     assert r.returncode == 3 and "p@localhost" not in r.stderr
     r = _run("schema", "nope")
     assert r.returncode == 1
+
+
+def test_cli_kind_mismatch_exit_1():
+    r = _run("sql", "minio", "SELECT 1", env_extra={"MI_MINIO": "http://AK:TopSecret99@h:9000/b"})
+    assert r.returncode == 1 and "kind=postgres" in r.stderr and "TopSecret99" not in r.stderr
