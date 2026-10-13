@@ -1,6 +1,6 @@
 # 자료(슬라이드) 작성 규칙
 
-사내 보고 자료 1장을 만들 때 에이전트가 따르는 규칙. 말투는 `docs/design/slide-tone.md` 를 따른다 (그 파일은 사내 비공개 레포에만 채워져 있음).
+사내 보고 자료 1장을 만들 때 에이전트가 따르는 규칙. 말투는 `design/slide-tone.md` 를 따른다 (그 파일은 사내 비공개 레포에만 채워져 있음).
 
 ## 페이지 구성 (위→아래)
 
@@ -27,9 +27,9 @@
 - 도넛: 바깥에 선 없이 조각 옆에 라벨 `중국 27%` / `(+9%)` 두 줄. 표는 따로 두지 않는다.
 - 범례: 20px 정사각형(모서리 둥글지 않게) + 이름, 가로 한 줄.
 - 글자 크기 단계: 56 / 34 / 28 / 24 / 22(막대 안) 만 쓴다.
-- 폰트: 웹(Claude Slides)에선 Noto Sans KR, 사내 PPT 는 맑은 고딕, 외부 공개용은 Pretendard (`docs/design/shadcn-navy-theme.css`).
+- 폰트: 웹(Claude Slides)에선 Noto Sans KR, 사내 PPT 는 맑은 고딕, 외부 공개용은 Pretendard (`design/shadcn-navy-theme.css`).
 
 ## 예시
 
-- `docs/design/templates/smartwatch-tam.html`: 위 규칙을 전부 적용한 1장 (Claude Slides 슬라이드 형식, 1920×1080, 인라인 스타일). 새 자료는 이 파일 구조를 복사해 내용만 바꾼다.
+- `design/templates/smartwatch-tam.html`: 위 규칙을 전부 적용한 1장 (Claude Slides 슬라이드 형식, 1920×1080, 인라인 스타일). 새 자료는 이 파일 구조를 복사해 내용만 바꾼다.
 - 데이터 집계 SQL: `sources/smartwatch.md` 의 `## 자료(슬라이드)용 집계`.

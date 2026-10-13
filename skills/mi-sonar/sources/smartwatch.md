@@ -183,7 +183,7 @@ FROM reg GROUP BY region ORDER BY this_year_mu DESC
 
 ### 그래프 색
 
-그래프용 vendor 색 = Apple navy #0f1e3b, Samsung #2c57cd, Huawei #407aea, Garmin #87bafd, Fitbit #2342a3, Others #9aa8bd (`docs/design/shadcn-navy-theme.css` 기준).
+그래프용 vendor 색 = Apple navy #0f1e3b, Samsung #2c57cd, Huawei #407aea, Garmin #87bafd, Fitbit #2342a3, Others #9aa8bd (`design/shadcn-navy-theme.css` 기준).
 
 ## 주의사항
 

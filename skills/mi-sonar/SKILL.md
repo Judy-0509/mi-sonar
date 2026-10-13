@@ -1,29 +1,31 @@
 ---
 name: mi-sonar
-description: 스마트폰 시장 데이터(smartphone_market_data) 조회·집계·추세 분석과 MinIO 원본 파일 다운로드, 증권사 레포트(브로커 리서치) 검색·요약. "출하량", "점유율", "판매량", "성장률", "YoY", "모델별/분기별 수치", "제조사", "브랜드", "모델", "갤럭시", "아이폰", "분기", "조사기관", "market share", "shipments", "시장 데이터", "원본 파일", "mi-sonar 설치 확인", "증권사 레포트", "리포트", "애널리스트", "broker report", "스마트워치 TAM", "워치 TAM 점검", "smartwatch TAM" 같은 요청에 사용. 모든 DB 접근은 scripts/query.py 로만 한다.
+description: 스마트폰 시장 데이터(smartphone_market_data) 조회·집계·추세 분석과 MinIO 원본 파일 다운로드, 증권사 레포트(브로커 리서치) 검색·요약. "출하량", "점유율", "판매량", "성장률", "YoY", "모델별/분기별 수치", "제조사", "브랜드", "모델", "갤럭시", "아이폰", "분기", "조사기관", "market share", "shipments", "시장 데이터", "원본 파일", "mi-sonar 설치 확인", "증권사 레포트", "리포트", "애널리스트", "broker report", "스마트워치 TAM", "워치 TAM 점검", "smartwatch TAM", "자료 만들어", "슬라이드", "장표", "PPT 한 장" 같은 요청에 사용. 모든 DB 접근은 scripts/query.py 로만 한다.
+allowed-tools: Bash(python "${CLAUDE_SKILL_DIR}/scripts/query.py" *)
 ---
 
 # mi-sonar
 
 읽기전용 데이터 조회 스킬. 실행 파일은 `scripts/query.py` 하나뿐이다.
+`${CLAUDE_SKILL_DIR}` 는 이 SKILL.md 가 있는 폴더다. 치환되지 않은 채 보이면(OpenCode 등) 이 파일의 폴더 경로를 넣는다.
 아래 명령은 Git Bash와 PowerShell 모두에서 그대로 동작한다:
 
 | 목적 | 명령 |
 |---|---|
-| 소스 목록·환경변수 상태 | `python "$HOME/.claude/skills/mi-sonar/scripts/query.py" sources` |
-| 테이블 컬럼·샘플 | `python "$HOME/.claude/skills/mi-sonar/scripts/query.py" schema smartphone` |
-| SQL 실행 | `python "$HOME/.claude/skills/mi-sonar/scripts/query.py" sql smartphone "SELECT ..." [--limit N] [--csv 파일]` |
-| 원본 목록 | `python "$HOME/.claude/skills/mi-sonar/scripts/query.py" ls minio [접두어]` |
-| 원본 다운로드 | `python "$HOME/.claude/skills/mi-sonar/scripts/query.py" fetch minio <키> [--out 경로]` |
+| 소스 목록·환경변수 상태 | `python "${CLAUDE_SKILL_DIR}/scripts/query.py" sources` |
+| 테이블 컬럼·샘플 | `python "${CLAUDE_SKILL_DIR}/scripts/query.py" schema smartphone` |
+| SQL 실행 | `python "${CLAUDE_SKILL_DIR}/scripts/query.py" sql smartphone "SELECT ..." [--limit N] [--csv 파일]` |
+| 원본 목록 | `python "${CLAUDE_SKILL_DIR}/scripts/query.py" ls minio [접두어]` |
+| 원본 다운로드 | `python "${CLAUDE_SKILL_DIR}/scripts/query.py" fetch minio <키> [--out 경로]` |
 
 SQL은 큰따옴표로 감싸고, SQL 안의 문자열 리터럴은 작은따옴표로 쓴다. SQL 안에는 `$` 를 절대 쓰지 않는다.
 
 ## 작업 순서
 
 1. **설치 확인**: 세션에서 처음 쓸 때 `sources` 실행. 질문에 필요한 소스가 `미설정`일 때만 사용자에게
-   "README 맨 위의 설치 한 줄을 PowerShell에 붙여넣고 새 터미널을 여세요"라고 안내하고 중단.
+   "README 의 설치 안내대로 `install.ps1` 을 한 번 실행하고 새 터미널을 여세요 (Claude Code 플러그인이면 세션 시작 안내에 그 경로가 있다)"라고 안내하고 중단.
    DB 질문은 `smartphone` 만 있으면 된다 (`minio` 는 원본 파일이 필요할 때만). 환경변수 값은 절대 출력하지 않는다.
-2. **소스 이해**: `sources/smartphone.md`의 컬럼 의미를 읽는다. 세션당 1회 `schema smartphone`으로
+2. **소스 이해**: `${CLAUDE_SKILL_DIR}/sources/smartphone.md`의 컬럼 의미를 읽는다. 세션당 1회 `schema smartphone`으로
    실제 컬럼을 확인한다(컬럼은 바뀔 수 있다. 문서가 아니라 `schema` 출력이 정답).
 3. **조사기관 확정**: 이 테이블은 같은 항목을 여러 조사기관이 전망한 행이 함께 들어 있다.
    - 사용자가 기관을 지정했으면 그 기관으로 필터한다.
@@ -56,7 +58,7 @@ SQL은 큰따옴표로 감싸고, SQL 안의 문자열 리터럴은 작은따옴
 
 ## 증권사 레포트 찾기 (소스 `reports`)
 
-스마트폰 관련 증권사 레포트 1건 = 1행 (`sales_team.nasdaq_report_doc`). 컬럼과 예시 쿼리는 `sources/reports.md`.
+스마트폰 관련 증권사 레포트 1건 = 1행 (`sales_team.nasdaq_report_doc`). 컬럼과 예시 쿼리는 `${CLAUDE_SKILL_DIR}/sources/reports.md`.
 
 0. **표 확인**: `schema reports` 나 첫 쿼리가 "relation ... does not exist" 로 실패하면 레포트 표가 아직 만들어지지 않았다고 사용자에게 알리고 멈춘다 (재시도하지 말고, 다른 표를 추측하지 않는다).
 1. **좁히기**: `topics`, `keywords`, `summary`, `title` 을 질문의 한국어·영어 단어로 `ILIKE` 하고 증권사·기간으로 거른다. 이 단계에서는 `body` 를 SELECT 하지 않는다.
@@ -66,14 +68,14 @@ SQL은 큰따옴표로 감싸고, SQL 안의 문자열 리터럴은 작은따옴
 
 ## 스마트워치 TAM 점검 (소스 `smartwatch`)
 
-"스마트워치 TAM", "워치 TAM 점검", "smartwatch TAM" 요청. 컬럼·패턴은 `sources/smartwatch.md`. 모든 SQL 에 `dataset` 조건을 넣는다.
+"스마트워치 TAM", "워치 TAM 점검", "smartwatch TAM" 요청. 컬럼·패턴은 `${CLAUDE_SKILL_DIR}/sources/smartwatch.md`. 모든 SQL 에 `dataset` 조건을 넣는다.
 
 0. **표 확인**: `smartwatch` 쿼리가 "relation ... does not exist" 로 실패하면 "테이블 미생성" 이라고 안내하고 멈춘다 (재시도·추측 금지, 레포트 단계와 같은 규칙).
 1. **최신 발행월**: `sql smartwatch "SELECT dataset, published_month FROM sales_team.smartwatch_market_data GROUP BY dataset, published_month ORDER BY dataset, published_month DESC"` 로 `dataset` 별 최신 발행월과 직전 발행월을 구해 답에 두 값을 명시한다.
 2. **갱신 분기** (최신 발행월이 직전 점검 이후): 표 2개.
    - (가) 업체별 최신 실적 vs 우리 TAM: 같은 분기, Worldwide 합계는 실적 국가 합산. 차이·차이율을 보이고 ±5% 초과는 "변경 후보" 로 표시.
      `WITH a AS (SELECT DISTINCT ON (period, country, vendor) period, country, vendor, sell_in_mu FROM sales_team.smartwatch_market_data WHERE dataset = 'actual' AND period = '2026Q3' ORDER BY period, country, vendor, published_month DESC), t AS (SELECT DISTINCT ON (period, vendor) period, vendor, sell_in_mu FROM sales_team.smartwatch_market_data WHERE dataset = 'our_tam' AND period = '2026Q3' ORDER BY period, vendor, published_month DESC) SELECT t.vendor, SUM(a.sell_in_mu) AS actual_mu, t.sell_in_mu AS tam_mu, SUM(a.sell_in_mu) - t.sell_in_mu AS diff_mu, ROUND(100.0 * (SUM(a.sell_in_mu) - t.sell_in_mu) / NULLIF(t.sell_in_mu, 0), 1) AS diff_pct FROM t JOIN a ON a.vendor = t.vendor GROUP BY t.vendor, t.sell_in_mu ORDER BY t.vendor`
-   - (나) 연간 전망(`dataset = 'forecast'`)의 직전 발행월 대비 업체별 변화: `sources/smartwatch.md` 의 "두 발행월 비교" 패턴에서 `dataset = 'forecast'`, `period` 를 연도로 바꿔 쓴다.
+   - (나) 연간 전망(`dataset = 'forecast'`)의 직전 발행월 대비 업체별 변화: `${CLAUDE_SKILL_DIR}/sources/smartwatch.md` 의 "두 발행월 비교" 패턴에서 `dataset = 'forecast'`, `period` 를 연도로 바꿔 쓴다.
 3. **미갱신 분기**: 숫자는 바꾸지 않는다.
    - (가) `reports` 소스에서 직전 점검 이후 `firm = 'TechInsights' AND report_type = 'firm_analysis'` 기사와 `topics ILIKE '%스마트워치%'` 증권사 레포트를 찾아 요약과 핵심 숫자를 인용한다 (레포트 찾기 규칙 그대로).
    - (나) 사용자가 외부 보도자료(Counterpoint Insights, Omdia PR, IDC 헤드라인)를 붙여주면 **증감 방향과 이유만** 메모한다. 집계 범위가 달라 TechInsights 숫자와 섞지 않는다.
@@ -85,10 +87,10 @@ SQL은 큰따옴표로 감싸고, SQL 안의 문자열 리터럴은 작은따옴
 
 "자료 만들어", "슬라이드", "장표", "PPT 한 장" 요청.
 
-0. `docs/design/slide-rules.md` 와 `docs/design/slide-tone.md` 를 읽는다. tone 파일의 표가 비어 있으면 "말투 샘플 없음, 규칙 파일만 적용" 이라고 한 줄 알린다.
+0. `${CLAUDE_SKILL_DIR}/design/slide-rules.md` 와 `${CLAUDE_SKILL_DIR}/design/slide-tone.md` 를 읽는다. tone 파일의 표가 비어 있으면 "말투 샘플 없음, 규칙 파일만 적용" 이라고 한 줄 알린다.
 1. 쟁점 문장부터 쓴다 (현 상황 + 핵심 + 모니터링 포인트). 사용자에게 보여주고 확인받은 뒤 나머지를 쓴다.
-2. 좌/우 카드 내용을 정한다: 각 카드 = 그래프 1개 + bullet 2개 + 출처. 숫자는 `sources/*.md` 의 집계 쿼리로 `sql` 명령을 돌려 가져온다; 숫자를 지어내지 않는다.
-3. `docs/design/templates/smartwatch-tam.html` 을 복사해 내용만 바꾼다 (구조·색·크기 유지). Claude Slides 로 만들 때도 같은 규칙.
+2. 좌/우 카드 내용을 정한다: 각 카드 = 그래프 1개 + bullet 2개 + 출처. 숫자는 `${CLAUDE_SKILL_DIR}/sources/*.md` 의 집계 쿼리로 `sql` 명령을 돌려 가져온다; 숫자를 지어내지 않는다.
+3. `${CLAUDE_SKILL_DIR}/design/templates/smartwatch-tam.html` 을 복사해 내용만 바꾼다 (구조·색·크기 유지). Claude Slides 로 만들 때도 같은 규칙.
 4. 출력: 쟁점 문장, 카드 제목 2개, bullet 4개, 사용한 쿼리·발행월을 먼저 글로 보여주고, 그 다음 파일을 만든다.
 
 ## 제약 (스크립트가 강제함)
@@ -106,5 +108,5 @@ SQL은 큰따옴표로 감싸고, SQL 안의 문자열 리터럴은 작은따옴
 
 ## 새 소스 추가 (소유자용)
 
-`sources/<이름>.md` 를 만들고 머리에 `name / kind(postgres|s3) / env / tables / summary` 를 적은 뒤,
+레포의 `skills/mi-sonar/sources/<이름>.md` 를 만들고 머리에 `name / kind(postgres|s3) / env / tables / summary` 를 적은 뒤,
 해당 환경변수를 `install.ps1` 의 `$EnvVars` 에 추가한다. 코드 수정 없음.

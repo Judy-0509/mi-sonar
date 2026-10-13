@@ -1,0 +1,13 @@
+{
+  "name": "mi-sonar",
+  "description": "MI 그룹 사내 플러그인",
+  "owner": {"name": "MI group"},
+  "plugins": [
+    {
+      "name": "mi-sonar",
+      "source": "./",
+      "description": "MI 그룹 시장 데이터 조회·증권사 레포트·스마트워치 TAM·자료 작성 스킬",
+      "version": "0.2.0"
+    }
+  ]
+}
