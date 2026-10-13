@@ -1,7 +1,7 @@
 # 증권사 레포트 저장 설계
 
 작성일: 2026-10-13
-상태: **설계 메모 (db_check 결과 대기 중)**
+상태: **db_check 완료 (2026-10-13) — DBaaS 팀에 스키마 요청 중**
 
 스마트폰 DB 정리가 먼저입니다. 이 문서는 그 뒤에 증권사 레포트 작업을 바로 시작할 수 있도록, 이미 합의된 결정과 db_check 결과로 정할 항목을 미리 적어둔 것입니다. 조사기관, 소스(`sources/*.md`), `query.py` 등 기존 결정은 [mi-sonar 설계 스펙](2026-10-13-mi-sonar-design.md)을 따르며 여기서 다시 쓰지 않습니다.
 
@@ -30,10 +30,10 @@
 - **외래키**: 다른 테이블 행의 주민번호를 적어둔 칸입니다. 주인 없는 행(고아 행)을 막고, 주인 행을 지우면 딸린 행도 같이 지울 수 있습니다.
 - **인덱스**: 책 뒤의 색인입니다. 자주 찾는 칸에만 만들며, 대가로 적재가 약간 느려집니다.
 
-`{S}`는 자리표시자입니다. db_check 판정이 "스키마 분리 가능"이면 `{S}` = `reports.` 로 쓰고 맨 앞에 `CREATE SCHEMA reports;` 를 먼저 실행합니다. "테이블만 가능"이면 접두어 방식을 쓰며, 이때 두 테이블 이름은 `report_doc` 과 `report_chunk` 입니다. 즉 `{S}report` 는 `report_doc` 으로, `{S}chunk` 는 `report_chunk` 로 바뀌고, `{S}chunk` 의 외래키는 `report_doc(report_id)` 를 가리킵니다.
+`{S}` = `mi_reports.` (스키마 `mi_reports`는 DBaaS 팀에 요청). `CREATE SCHEMA`는 DBaaS 팀이 실행하며 우리가 하지 않습니다. 거절 시에는 테이블별 요청하며 이름은 `reports_report`, `reports_chunk` 입니다.
 
 ```sql
-CREATE TABLE {S}report (
+CREATE TABLE mi_reports.report (
   report_id     bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   firm          text        NOT NULL,            -- 증권사
   published_on  date        NOT NULL,            -- 발행일
@@ -50,22 +50,21 @@ CREATE TABLE {S}report (
   body_loaded   boolean     NOT NULL DEFAULT false,
   loaded_at     timestamptz NOT NULL DEFAULT now()
 );
-CREATE INDEX ON {S}report (firm, published_on);
-CREATE INDEX ON {S}report (published_on);
-CREATE INDEX ON {S}report USING gin (topics);
-CREATE INDEX ON {S}report USING gin (keywords);
+CREATE INDEX ON mi_reports.report (firm, published_on);
+CREATE INDEX ON mi_reports.report (published_on);
+CREATE INDEX ON mi_reports.report USING gin (topics);
+CREATE INDEX ON mi_reports.report USING gin (keywords);
 
-CREATE TABLE {S}chunk (
+CREATE TABLE mi_reports.chunk (
   chunk_id   bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-  report_id  bigint NOT NULL REFERENCES {S}report(report_id) ON DELETE CASCADE,
+  report_id  bigint NOT NULL REFERENCES mi_reports.report(report_id) ON DELETE CASCADE,
   page       int    NOT NULL,
   seq        int    NOT NULL,                     -- 같은 페이지 안 순서
   content    text   NOT NULL,
   UNIQUE (report_id, page, seq)
 );
-CREATE INDEX ON {S}chunk (report_id, page);
--- 본문 검색 인덱스는 db_check 결과에 따라 (6절)
--- 접두어 방식이면 {S}report -> report_doc, {S}chunk -> report_chunk, 외래키는 report_doc(report_id) 참조
+CREATE INDEX ON mi_reports.chunk (report_id, page);
+CREATE INDEX ON mi_reports.chunk USING gin (content gin_trgm_ops);
 ```
 
 각 키와 인덱스의 역할입니다.
@@ -108,7 +107,7 @@ CREATE INDEX ON {S}chunk (report_id, page);
 
 ```sql
 SELECT report_id, firm, published_on, title, summary
-FROM {S}report
+FROM mi_reports.report
 WHERE published_on >= DATE '2026-01-01'
   AND topics @> ARRAY['스마트폰']
   AND keywords && ARRAY['폴더블']
@@ -119,7 +118,7 @@ ORDER BY published_on DESC;
 
 ```sql
 SELECT report_id, page, seq, content
-FROM {S}chunk
+FROM mi_reports.chunk
 WHERE report_id IN (101, 102, 103)
   AND content ILIKE '%폴더블%'
 ORDER BY report_id, page, seq;
@@ -132,8 +131,8 @@ ORDER BY report_id, page, seq;
 | 수단 | 필요 조건 | 효과 |
 |---|---|---|
 | ILIKE | 없음 (지금 바로 가능) | 글자가 그대로 들어 있는 곳을 찾음 |
-| pg_trgm GIN | 확장(DB 추가 기능) 설치 가능 | 세 글자 단위로 색인해 오타·부분일치에 강하고 ILIKE도 빨라짐 |
-| pgvector | 확장 + 임베딩(문장을 숫자로 바꾼 값) | 단어가 달라도 뜻이 비슷하면 찾는 의미 검색 |
+| pg_trgm GIN (설치 확인됨 → 1차 적용) | 확장(DB 추가 기능) 설치 가능 | 세 글자 단위로 색인해 오타·부분일치에 강하고 ILIKE도 빨라짐 |
+| pgvector (설치 확인됨 → 다음 단계, 임베딩 생성 필요) | 확장 + 임베딩(문장을 숫자로 바꾼 값) | 단어가 달라도 뜻이 비슷하면 찾는 의미 검색 |
 
 ## 7. 기존 `smartphone_market_data` 에도 적용할 후보
 
@@ -147,16 +146,33 @@ ORDER BY report_id, page, seq;
 
 ## 8. db_check 결과를 받으면 정할 것
 
-- [ ] `{S}` 접두 방식: 스키마 분리(`reports.`) vs 테이블 접두어(`report_`)
-- [ ] 본문 검색 인덱스: ILIKE만 / pg_trgm / pgvector
-- [ ] 쓰기 계정 발급 여부
+- [x] `{S}` 접두 방식 → `mi_reports.` (전용 스키마)
+- [x] 본문 검색 인덱스 → pg_trgm GIN 1차 (pgvector는 다음 단계)
+- [x] 쓰기 계정 발급 여부 → 있음
 - [ ] `smartphone_market_data` 소유권 (제약을 추가할 수 있는지)
 - [ ] 7절 후보 중 무엇을 적용할지
+- [ ] DBaaS 팀 스키마 생성 요청 결과
+
+## 8b. DBaaS 팀 요청문
+
+```
+[요청] MI 그룹 전용 스키마 생성
+1. 스키마 이름: mi_reports
+2. 소유자: 현재 쓰기 계정 (계정명: <쓰기 계정>) — 이 스키마 안에서 CREATE/ALTER/DROP 가능하도록
+3. 읽기 계정 sLSImi 에게: USAGE ON SCHEMA mi_reports + SELECT ON ALL TABLES
+4. 앞으로 생기는 테이블에도 자동 적용되도록:
+   ALTER DEFAULT PRIVILEGES FOR ROLE <쓰기 계정> IN SCHEMA mi_reports GRANT SELECT ON TABLES TO sLSImi;
+5. 확장 pg_trgm, vector 는 이미 설치되어 있어 추가 요청 없음
+용도: 증권사 레포트 본문·요약 저장 (약 100건, 수십 MB 수준). 기존 sales_team 스키마는 건드리지 않음.
+```
+
+거절 시 대안: 테이블 3개(`reports_report`, `reports_chunk`, `firm_narrative`) 생성 요청, DDL은 3절.
 
 ## 9. 다음 단계 순서
 
 1. 스마트폰 DB 정리 (사내 작업 진행 중)
-2. db_check 판정
-3. 이 문서 8절 확정
-4. `tools/load_reports.py` + `sources/reports.md` + SKILL.md 검색 단계 추가
-5. 숫자 구조화 (별도 설계)
+2. db_check 판정 (완료)
+3. DBaaS 스키마 승인
+4. 이 문서 8절 확정
+5. `tools/load_reports.py` + `sources/reports.md` + SKILL.md 검색 단계 추가
+6. 숫자 구조화 (별도 설계)
