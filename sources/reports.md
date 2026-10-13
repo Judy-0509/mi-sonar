@@ -7,7 +7,7 @@ summary: 증권사 레포트 (스마트폰 관련만, 요약·키워드·영문 
 ---
 ## 무엇이 들어 있나
 
-- 스마트폰(완제품·부품·시장)과 관련된 증권사 레포트만 1건 = 1행으로 들어 있다. 관련 없는 레포트는 없다.
+- 스마트폰(완제품·부품·시장)과 관련된 증권사 레포트만 1건 = 1행으로 들어 있다. 원칙적으로 관련 없는 레포트는 없다 (분류 단계에서 제외된다).
 - `body` 는 PDF에서 뽑은 **영어 원문**이다. 면책·공시 부분은 잘라냈고, 각 쪽 앞에 `[p.N]` 페이지 표시가 있다.
 - `summary`, `keywords` 는 한국어와 영어가 함께 있고, `topics` 는 한국어 고정 목록이다.
 
@@ -19,7 +19,7 @@ summary: 증권사 레포트 (스마트폰 관련만, 요약·키워드·영문 
 | firm | 증권사 | 예: JPMorgan, Nomura |
 | published_on | 발행일 | DATE |
 | title | 제목 (영어) | |
-| report_type | 종류 | weekly_note, company_update, industry_deep_dive, mgmt_meeting, other |
+| report_type | 종류 | weekly_note, company_update, industry_deep_dive, mgmt_meeting, other, link_digest | `link_digest`(링크 모음)는 보통 분류 단계에서 제외되지만 수동으로 들어올 수 있다 |
 | topics | 주제, 쉼표로 이은 문자열 | 스마트폰, AP, 메모리, 카메라, 디스플레이, 모뎀, 파운드리, OEM, 공급망, 거시 중에서 |
 | analyst | 애널리스트 | 없을 수 있음 |
 | pages | PDF 전체 쪽수 | |

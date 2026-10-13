@@ -154,15 +154,19 @@ invalid; fix it and run again.
 
 ### 4b. Company DB (only after the owner confirms the table exists and the write account has its grants)
 
+**Owner only, typed by hand. The agent stops after 4a and reports.** Never put these values in a command an agent runs or in a file.
+
 ```powershell
-$env:MI_DB_REPORTS_WRITE = "postgresql://USER:PASSWORD@HOST:5432/DBNAME"   # URL-encode special chars, e.g. @ -> %40
-$env:MI_MINIO_WRITE      = "http://ACCESS:SECRET@HOST:9000/BUCKET"
+# Prompts without echo and without shell history. DSN: postgresql://USER:PASSWORD@HOST:5432/DBNAME (URL-encode special chars, e.g. @ -> %40)
+# MinIO: http://ACCESS:SECRET@HOST:9000/BUCKET
+$env:MI_DB_REPORTS_WRITE = [Net.NetworkCredential]::new('', (Read-Host 'MI_DB_REPORTS_WRITE' -AsSecureString)).Password
+$env:MI_MINIO_WRITE      = [Net.NetworkCredential]::new('', (Read-Host 'MI_MINIO_WRITE' -AsSecureString)).Password
 python tools/load_reports.py load --dsn-env MI_DB_REPORTS_WRITE
 Remove-Item Env:MI_DB_REPORTS_WRITE, Env:MI_MINIO_WRITE
 ```
 
 - If the table does not exist yet the command stops with `테이블이 아직 없습니다` and writes nothing.
-- Each report is one transaction: MinIO upload, then the row. A `FAIL <id>` line does not stop the others.
+- Each report is one transaction: the row is inserted first, then the PDF is uploaded; an upload failure rolls the row back. A `FAIL <id>` line does not stop the others.
 - Safe to re-run: a report whose `file_sha256` is already in the table is skipped and not uploaded again.
 - `--no-minio` loads rows without uploading PDFs. Use it only if the owner says so.
 
