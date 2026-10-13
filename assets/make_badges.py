@@ -8,12 +8,6 @@ B = [  # (file, label, message, color, logo)
     ("minio", "storage", "minio", "C72C48", "minio"),
     ("agent", "agent", "claude code · opencode", "D97757", ""),
     ("tests", "tests", "48 passing", "4C1", ""),
-    ("want-trending", "WANT", "GitHub Trending #1", "ff69b4", ""),
-    ("want-best-repo", "WANT", "Best Repo of 2026", "gold", ""),
-    ("want-stars", "WANT", "10k stars (현재 1)", "yellow", ""),
-    ("want-tool-of-year", "WANT", "올해의 사내 툴", "8A2BE2", ""),
-    ("want-usage", "WANT", "사내 사용률 1위", "2ea44f", ""),
-    ("want-ax", "WANT", "AX 대상", "ff8c00", ""),
 ]
 enc = lambda s: quote(s.replace("-", "--").replace("_", "__"), safe="")
 out = pathlib.Path(__file__).parent / "badges"

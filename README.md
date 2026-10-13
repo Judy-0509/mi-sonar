@@ -10,17 +10,6 @@
   <img alt="tests" src="assets/badges/tests.svg">
 </p>
 
-<p align="center"><sub>🏆 <b>WANT</b> — 받고 싶은 상 (아직 하나도 못 받음)</sub></p>
-
-<p align="center">
-  <img alt="want" src="assets/badges/want-trending.svg">
-  <img alt="want" src="assets/badges/want-best-repo.svg">
-  <img alt="want" src="assets/badges/want-stars.svg">
-  <img alt="want" src="assets/badges/want-tool-of-year.svg">
-  <img alt="want" src="assets/badges/want-usage.svg">
-  <img alt="want" src="assets/badges/want-ax.svg">
-</p>
-
 ## 설치: 아래 상자를 복사해서 Claude Code 또는 OpenCode에 그대로 붙여넣으세요
 
 ```text
