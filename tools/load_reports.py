@@ -161,3 +161,111 @@ def url_count(text: str) -> int:
 def smartphone_hits(text: str) -> int:
     low = text.lower()
     return sum(low.count(w) for w in SMARTPHONE_WORDS)
+
+
+# ---------- extract ----------
+
+def read_json(path: Path):
+    return json.loads(path.read_text(encoding="utf-8-sig")) if path.exists() else None
+
+
+def write_json(path: Path, data: dict) -> None:
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def read_pages(pdf: Path) -> tuple[list[str], str]:
+    """Page texts via pdfplumber, else pypdf (lazy imports). Returns (pages, extractor name)."""
+    try:
+        import pdfplumber
+    except ImportError:
+        pdfplumber = None
+    if pdfplumber is not None:
+        with pdfplumber.open(pdf) as doc:
+            return [p.extract_text() or "" for p in doc.pages], "pdfplumber"
+    try:
+        from pypdf import PdfReader
+    except ImportError:
+        raise LoaderError("PDF 추출 라이브러리가 없습니다: pip install -r requirements-dev.txt", 2) from None
+    return [p.extract_text() or "" for p in PdfReader(pdf).pages], "pypdf"
+
+
+def extract_one(pdf: Path, staging: Path, force: bool) -> str:
+    info = parse_filename(pdf.name)
+    sha = file_sha256(pdf)
+    rid = sha[:12]
+    d = staging / rid
+    old = read_json(d / "meta.json")
+    if old and not force:
+        return f"skip {rid} (이미 추출됨) {pdf.name}"
+    raw, extractor = read_pages(pdf)
+    pages, heading = cut_disclosure(strip_repeated_lines(raw))
+    body = render_body(pages)
+    meta = {
+        "id": rid,
+        "file_sha256": sha,
+        "source_path": str(pdf.resolve()),
+        **info,
+        "pages": len(raw),
+        "body_pages": len(pages),
+        "cut_heading": heading,
+        "chars": len(body),
+        "url_count": url_count(body),
+        "smartphone_hits": smartphone_hits(body),
+        "extractor": extractor,
+        "extracted_at": datetime.now().isoformat(timespec="seconds"),
+        "loaded": (old or {}).get("loaded", {}),
+    }
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "text.txt").write_text(body, encoding="utf-8")
+    write_json(d / "meta.json", meta)
+    return (f"ok   {rid} {info['published_on']} {info['firm']} pages={len(raw)} body={len(pages)} "
+            f"cut={heading or '-'} phone={meta['smartphone_hits']} url={meta['url_count']} {pdf.name}")
+
+
+def cmd_extract(staging: Path, paths: list[Path], force: bool) -> int:
+    pdfs: list[Path] = []
+    for p in paths:
+        pdfs += sorted(f for f in p.iterdir() if f.suffix.lower() == ".pdf") if p.is_dir() else [p]
+    failed = 0
+    for pdf in pdfs:
+        try:
+            print(extract_one(pdf, staging, force))
+        except LoaderError:
+            raise
+        except Exception as e:  # one bad PDF must not stop the batch
+            failed += 1
+            print(f"FAIL {pdf.name}: {type(e).__name__}: {e}")
+    print(f"(PDF {len(pdfs)}개, 실패 {failed}개)")
+    return 1 if failed else 0
+
+
+# ---------- CLI ----------
+
+def main(argv: list[str] | None = None) -> int:
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except AttributeError:
+            pass
+    p = argparse.ArgumentParser(prog="load_reports.py", description=__doc__)
+    p.add_argument("--staging", type=Path, default=STAGING, help="작업 폴더 (기본: 저장소의 staging/)")
+    sub = p.add_subparsers(dest="cmd", required=True)
+    s = sub.add_parser("extract", help="PDF -> staging/<id>/text.txt + meta.json")
+    s.add_argument("paths", nargs="+", type=Path, help="PDF 파일 또는 PDF가 든 폴더")
+    s.add_argument("--force", action="store_true", help="이미 추출된 것도 다시 추출")
+    a = p.parse_args(argv)
+    try:
+        return cmd_extract(a.staging, a.paths, a.force)
+    except LoaderError as e:
+        print(f"[load_reports] {e}", file=sys.stderr)
+        return e.code
+    except Exception as e:  # driver/network errors: class + masked message, never a DSN or secret
+        msg = str(e)
+        for env in (getattr(a, "dsn_env", None), MINIO_ENV):
+            msg = redact(msg, os.environ.get(env) if env else None)
+        print(f"[load_reports] {type(e).__name__}: {msg}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

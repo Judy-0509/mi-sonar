@@ -121,3 +121,90 @@ def test_signals():
     text = "See https://a.example and www.b.example. Smartphone units; iPhone shipments; handsets."
     assert lr.url_count(text) == 2
     assert lr.smartphone_hits(text) == 5  # smartphone, units, iphone, shipments, handset
+
+
+# ---------- extract ----------
+
+def make_pdf(path: Path, pages: list[list[str]]) -> None:
+    """Write a minimal valid PDF: one Helvetica text stream per page, one line per entry."""
+    objs = ["<< /Type /Catalog /Pages 2 0 R >>", None, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"]
+    kids = []
+    for lines in pages:
+        esc = [ln.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)") for ln in lines]
+        stream = "BT /F1 10 Tf 14 TL 72 760 Td " + " ".join(f"({ln}) Tj T*" for ln in esc) + " ET"
+        objs.append(f"<< /Length {len(stream)} >>\nstream\n{stream}\nendstream")
+        objs.append(f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+                    f"/Resources << /Font << /F1 3 0 R >> >> /Contents {len(objs)} 0 R >>")
+        kids.append(f"{len(objs)} 0 R")
+    objs[1] = f"<< /Type /Pages /Kids [{' '.join(kids)}] /Count {len(kids)} >>"
+    out, offsets = b"%PDF-1.4\n", []
+    for i, body in enumerate(objs, 1):
+        offsets.append(len(out))
+        out += f"{i} 0 obj\n{body}\nendobj\n".encode("latin-1")
+    xref = len(out)
+    out += f"xref\n0 {len(objs) + 1}\n0000000000 65535 f \n".encode()
+    out += "".join(f"{o:010d} 00000 n \n" for o in offsets).encode()
+    out += f"trailer\n<< /Size {len(objs) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode()
+    path.write_bytes(out)
+
+
+PDF_NAME = "06-Oct-2026_08-02-29-MU-USQ-JPMorgan-Micron_Mgmt_Mtg.PDF"
+PDF_PAGES = [
+    [HEADER, "Smartphone shipments rose", "in 3Q26 as demand recovered.", "1"],
+    [HEADER, "Memory content per handset grows.", "2"],
+    [HEADER, "Analyst Certification", "I certify that the views are mine.", "3"],
+    [HEADER, "Important Disclosures", "Ratings definitions.", "4"],
+]
+
+
+@pytest.fixture
+def pdf_dir(tmp_path):
+    d = tmp_path / "pdfs"
+    d.mkdir()
+    make_pdf(d / PDF_NAME, PDF_PAGES)
+    (d / "notes.txt").write_text("not a pdf", encoding="utf-8")
+    return d
+
+
+@pytest.fixture(params=["pdfplumber", "pypdf"])
+def extractor(request, monkeypatch):
+    pytest.importorskip(request.param)
+    if request.param == "pypdf":
+        monkeypatch.setitem(sys.modules, "pdfplumber", None)  # import pdfplumber -> ImportError
+    return request.param
+
+
+def test_extract_writes_staging_and_is_idempotent(pdf_dir, tmp_path, extractor, capsys):
+    st = tmp_path / "staging"
+    assert lr.main(["--staging", str(st), "extract", str(pdf_dir)]) == 0
+    sha = hashlib.sha256((pdf_dir / PDF_NAME).read_bytes()).hexdigest()
+    d = st / sha[:12]
+    meta = json.loads((d / "meta.json").read_text(encoding="utf-8"))
+    assert meta["id"] == sha[:12] and meta["file_sha256"] == sha
+    assert (meta["firm"], meta["ticker"], meta["title"]) == ("JPMorgan", "MU", "Micron Mgmt Mtg")
+    assert (meta["pages"], meta["body_pages"], meta["cut_heading"]) == (4, 2, "Analyst Certification")
+    assert meta["extractor"] == extractor and meta["smartphone_hits"] == 3
+    assert (d / "text.txt").read_text(encoding="utf-8") == (
+        "[p.1]\nSmartphone shipments rose in 3Q26 as demand recovered.\n"
+        "[p.2]\nMemory content per handset grows.\n"
+    )
+    assert not (d / "source.pdf").exists()
+    out = capsys.readouterr().out
+    assert "ok" in out and "notes.txt" not in out
+    assert lr.main(["--staging", str(st), "extract", str(pdf_dir / PDF_NAME)]) == 0
+    assert "skip" in capsys.readouterr().out
+
+
+def test_extract_bad_name_fails_but_continues(pdf_dir, tmp_path, capsys):
+    pytest.importorskip("pypdf")
+    make_pdf(pdf_dir / "random.pdf", [["x"]])
+    assert lr.main(["--staging", str(tmp_path / "st"), "extract", str(pdf_dir)]) == 1
+    out = capsys.readouterr().out
+    assert "FAIL random.pdf" in out and "ok" in out
+
+
+def test_extract_without_any_pdf_library(pdf_dir, tmp_path, monkeypatch, capsys):
+    monkeypatch.setitem(sys.modules, "pdfplumber", None)
+    monkeypatch.setitem(sys.modules, "pypdf", None)
+    assert lr.main(["--staging", str(tmp_path / "st"), "extract", str(pdf_dir)]) == 2
+    assert "requirements-dev.txt" in capsys.readouterr().err
