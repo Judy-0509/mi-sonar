@@ -19,8 +19,8 @@ summary: 증권사 레포트 (스마트폰 관련만, 요약·키워드·영문 
 | firm | 증권사 | 예: JPMorgan, Nomura |
 | published_on | 발행일 | DATE |
 | title | 제목 (영어) | |
-| report_type | 종류 | weekly_note, company_update, industry_deep_dive, mgmt_meeting, other, link_digest | `link_digest`(링크 모음)는 보통 분류 단계에서 제외되지만 수동으로 들어올 수 있다 |
-| topics | 주제, 쉼표로 이은 문자열 | 스마트폰, AP, 메모리, 카메라, 디스플레이, 모뎀, 파운드리, OEM, 공급망, 거시 중에서 |
+| report_type | 종류 | weekly_note, company_update, industry_deep_dive, mgmt_meeting, firm_analysis, other, link_digest | `firm_analysis` 는 조사기관(예: TechInsights)의 해설 기사로 `minio_key` 가 `.md` 이고 `pages` 는 1이다. `link_digest`(링크 모음)는 보통 분류 단계에서 제외되지만 수동으로 들어올 수 있다 |
+| topics | 주제, 쉼표로 이은 문자열 | 스마트폰, AP, 메모리, 카메라, 디스플레이, 모뎀, 파운드리, OEM, 공급망, 거시, 스마트워치 중에서 |
 | analyst | 애널리스트 | 없을 수 있음 |
 | pages | PDF 전체 쪽수 | |
 | minio_key | 원본 PDF의 MinIO 키 | `fetch minio <키>` 는 `MI_MINIO` 가 같은 버킷을 가리킬 때만 된다 |
@@ -51,7 +51,13 @@ SELECT id, firm, published_on, title,
 FROM sales_team.nasdaq_report_doc
 WHERE id IN (3, 7, 12) AND body ILIKE '%foldable%';
 
--- 3) 한 건의 본문 전체 읽기
+-- 3) TechInsights 스마트워치 기사 최근 2건
+SELECT id, published_on, title, summary, key_numbers
+FROM sales_team.nasdaq_report_doc
+WHERE firm = 'TechInsights' AND report_type = 'firm_analysis' AND topics ILIKE '%스마트워치%'
+ORDER BY published_on DESC LIMIT 2
+
+-- 4) 한 건의 본문 전체 읽기
 SELECT firm, published_on, title, body
 FROM sales_team.nasdaq_report_doc WHERE id = 7;
 ```

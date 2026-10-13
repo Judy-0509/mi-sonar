@@ -70,10 +70,11 @@ For each id, read the WHOLE `staging/<id>/text.txt` (and `meta.json` for firm, d
   - `company_update`: one company: earnings preview or review, estimate or rating change, reaction to news
   - `industry_deep_dive`: longer sector or thematic analysis (market size, supply chain, forecasts)
   - `mgmt_meeting`: write-up of a management meeting, investor day, conference meeting or site visit
+  - `firm_analysis`: short analysis article from a research firm (TechInsights), saved from pasted text as a `.md` file
   - `other`: anything else
 - `relevance`, exactly one of:
-  - `high`: the smartphone / handset / phone-component market, shipments or smartphone OEMs are the subject
-  - `medium`: the subject is something else, but the report has a section on smartphone demand
+  - `high`: the smartphone / handset / phone-component **or smartwatch** market, shipments or OEMs are the subject
+  - `medium`: the subject is something else, but the report has a section on smartphone / handset / phone-component **or smartwatch** demand
     (example: a memory report with a mobile-demand section)
   - `low`: unrelated
 - `reason`: one line, Korean, saying why.
@@ -121,8 +122,10 @@ For each report whose `status` line says `decision=load` (or `load*`), read the 
 | `summary_ko` | Exactly 3 strings, each one Korean sentence on one line. |
 | `summary_en` | One English sentence on one line. |
 | `keywords_ko`, `keywords_en` | 1 to 10 each. No commas inside a keyword. Company, product and technology names people would search for. |
-| `topics` | 1 or more, no duplicates, only from: `스마트폰, AP, 메모리, 카메라, 디스플레이, 모뎀, 파운드리, OEM, 공급망, 거시`. |
+| `topics` | 1 or more, no duplicates, only from: `스마트폰, AP, 메모리, 카메라, 디스플레이, 모뎀, 파운드리, OEM, 공급망, 거시, 스마트워치`. |
 | `key_numbers` | The key figures, copied exactly with unit and period, each followed by its `[p.N]`. `""` if the report has none. |
+
+For `kind` = `firm_analysis`: `keywords_en` MUST include every vendor name and every country / region named in the article (for example `Apple, Huawei, China, India`) and `keywords_ko` their Korean forms; `key_numbers` quotes every shipment and growth figure verbatim with `[p.1]`.
 
 No other keys. `report_type` comes from the triage `kind`; firm, date, market and the body come from the program.
 
