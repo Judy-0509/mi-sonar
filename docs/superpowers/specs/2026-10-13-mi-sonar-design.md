@@ -99,7 +99,7 @@ summary: smartphone_market_data 원본 파일 저장소
 - `statement_timeout` 30초, `connect_timeout` 10초.
 - 명령과 소스 kind 불일치(sql/schema↔postgres, ls/fetch↔s3) 시 종료코드 1.
 - 행 제한: 기본 200, `--limit` 최대 5,000. 초과 시 잘라내고
-  "결과가 잘렸습니다. SQL에서 집계하거나 --csv로 저장하세요" 안내.
+  "결과가 잘렸습니다 (CSV도 같은 행 제한). SQL에서 집계하거나 --limit 을 올리세요" 안내.
 - 접속 정보는 환경변수에서만 읽음. 출력·오류 메시지에 비밀번호 노출 금지.
   오류 출력에서 접속 문자열·비밀번호(원문과 URL 디코딩 값)를 `***` 로 마스킹.
 
@@ -145,7 +145,7 @@ clone 우선 방식: `git` 필수, zip 대체 경로 없음. 업데이트는 뒤
 OpenCode는 같은 폴더(~/.claude/skills)를 자동으로 읽으므로 별도 등록이 없다.
 모든 외부 명령(git, pip, python) 뒤에 종료코드를 확인해 실패하면 즉시 중단한다.
 
-README 나머지: 사용 예시 질문 5개, 문제 해결 3줄(환경변수 안 잡힘 → 터미널 재시작 등).
+README 나머지: 사용 예시 질문 5개, 문제 해결(환경변수·타임아웃·python·git).
 
 ## 8. 배너 (`assets/banner.png`)
 

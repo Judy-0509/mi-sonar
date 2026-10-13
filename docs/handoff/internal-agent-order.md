@@ -31,6 +31,8 @@ Set both env vars in the current shell, then run these 4 read-only checks with
    -> 0 rows.
 4. `SELECT table_schema, table_name FROM information_schema.table_privileges WHERE grantee = current_user AND privilege_type = 'SELECT'`
    -> list every row in your report; the owner confirms every listed table may be exposed to the team.
+5. `SELECT r.rolname FROM pg_auth_members m JOIN pg_roles r ON r.oid = m.roleid WHERE m.member = (SELECT oid FROM pg_roles WHERE rolname = current_user)`
+   -> stop if the result includes pg_write_all_data, pg_signal_backend, pg_read_server_files or pg_execute_server_program; list every other role in the report for the owner to review (inherited privileges are not visible to checks 2 and 4).
 
 ## 3. Fill `sources/smartphone.md`
 - Run `python scripts/query.py schema smartphone`.
@@ -64,7 +66,7 @@ python -m pytest scripts -q
   -> both 설정됨. Start OpenCode in any folder and confirm `mi-sonar` appears exactly once in its skills list
   (OpenCode reads `~/.claude/skills` natively; there is no separate registration).
 - In that terminal ask Claude Code: "2026년 2분기 제조사별 점유율 보여줘". It must call
-  `query.py sql` and answer with a table plus the SQL it used.
+  `query.py sql` and answer with a table plus the SQL it used. Claude asks which research firm to use first (SKILL.md step 3); choose one, then expect a table plus the SQL, naming the firm.
 
 ## 6. Report back
 Repo URL, commit hash, which step-4 commands passed, any column whose meaning is still unknown.

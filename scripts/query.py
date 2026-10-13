@@ -71,6 +71,8 @@ def get_source(name: str, sources: dict | None = None) -> dict:
             f"환경변수 {env} 가 설정되지 않았습니다. README의 설치 한 줄을 다시 실행하고 새 터미널을 여세요.",
             2,
         )
+    if src.get("kind") == "postgres" and conn.startswith(("postgres://", "postgresql://")) and "@" in conn.rsplit("@", 1)[0]:
+        raise SonarError(f"환경변수 {env} 의 비밀번호에 '@' 가 있습니다. URL 인코딩(%40)해서 다시 등록하세요.", 2)
     src["conn"] = conn
     return src
 
@@ -143,7 +145,7 @@ def clamp_limit(n: int) -> tuple[int, str]:
 def run_sql(src: dict, sql: str, limit: int) -> tuple[list[str], list[tuple], bool]:
     stmt = check_sql(sql)
     with connect_pg(src["conn"]) as conn:
-        conn.execute(f"SET statement_timeout = {TIMEOUT_MS}")  # not a startup option: PgBouncer-safe
+        conn.execute(f"SET LOCAL statement_timeout = {TIMEOUT_MS}")  # LOCAL: ends with the transaction, safe under PgBouncer transaction pooling
         with conn.cursor(name="mi_sonar") as cur:  # server-side cursor: never pulls the whole table
             cur.execute(stmt)
             rows = cur.fetchmany(limit + 1)
@@ -180,7 +182,7 @@ def cmd_schema(src: dict) -> str:
     tables = src.get("tables") or []
     out = []
     with connect_pg(src["conn"]) as conn:
-        conn.execute(f"SET statement_timeout = {TIMEOUT_MS}")
+        conn.execute(f"SET LOCAL statement_timeout = {TIMEOUT_MS}")
         with conn.cursor() as cur:
             if not tables:
                 cur.execute(

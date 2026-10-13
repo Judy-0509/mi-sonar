@@ -50,6 +50,16 @@ def test_get_source_requires_env(tmp_path, monkeypatch):
     assert s["conn"] == "postgresql://u:p@h/db"
 
 
+def test_get_source_rejects_unencoded_at_in_password(tmp_path, monkeypatch):
+    (tmp_path / "x.md").write_text("---\nname: x\nkind: postgres\nenv: X_ENV\n---\n", encoding="utf-8")
+    monkeypatch.setenv("X_ENV", "postgresql://u:p@ss@h/db")
+    with pytest.raises(q.SonarError) as e:
+        q.get_source("x", q.load_sources(tmp_path))
+    assert e.value.code == 2
+    monkeypatch.setenv("X_ENV", "postgresql://u:p%40ss@h/db")
+    assert q.get_source("x", q.load_sources(tmp_path))["conn"] == "postgresql://u:p%40ss@h/db"
+
+
 def test_get_source_unknown_name(tmp_path):
     with pytest.raises(q.SonarError) as e:
         q.get_source("nope", q.load_sources(tmp_path))
