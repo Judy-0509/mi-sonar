@@ -79,15 +79,22 @@ def test_cut_disclosure_skips_page_one_and_keeps_text_before_heading():
         "Last body paragraph.\nAnalyst Certification\nI, Jane Doe, certify...",
         "Important Disclosures\nRatings...",
     ]
-    kept, heading = lr.cut_disclosure(pages)
+    kept, heading = lr.cut_disclosure(pages, lr.load_dicts().cutoff)
     assert heading == "Analyst Certification"
     assert kept == pages[:2] + ["Last body paragraph."]
 
 
 def test_cut_disclosure_heading_at_page_top_and_none():
+    cutoff = lr.load_dicts().cutoff
     pages = ["p1", "p2", "IMPORTANT DISCLOSURES\nlegal"]
-    assert lr.cut_disclosure(pages) == (["p1", "p2"], "IMPORTANT DISCLOSURES")
-    assert lr.cut_disclosure(["p1", "p2"]) == (["p1", "p2"], None)
+    assert lr.cut_disclosure(pages, cutoff) == (["p1", "p2"], "IMPORTANT DISCLOSURES")
+    assert lr.cut_disclosure(["p1", "p2"], cutoff) == (["p1", "p2"], None)
+
+
+def test_cut_disclosure_dict_phrase_heading_only():
+    long = "Disclaimer: the figures above are estimates and should not be relied upon by any investor"
+    pages = ["Disclosure Appendix", f"Body two.\n{long}\nMore body.", "Body three.\nDisclosure Appendix\nlegal", "x"]
+    assert lr.cut_disclosure(pages, lr.load_dicts().cutoff) == (pages[:2] + ["Body three."], "Disclosure Appendix")
 
 
 def test_strip_page_numbers():
@@ -121,6 +128,107 @@ def test_signals():
     text = "See https://a.example and www.b.example. Smartphone units; iPhone shipments; handsets."
     assert lr.url_count(text) == 2
     assert lr.smartphone_hits(text) == 5  # smartphone, units, iphone, shipments, handset
+
+
+# ---------- dictionaries, paragraphs, tagging ----------
+
+def test_load_dicts_real_files():
+    d = lr.load_dicts()
+    assert len(d.tickers) >= 134 and len(d.cutoff) >= 8
+    assert [t for t, _ in d.topics] == ["ai", "smartphone", "auto", "smartwatch", "smartglass", "tablet", "humanoid"]
+    assert ("005930-KRX", "Samsung Electronics", ["Samsung", "Samsung Electronics", "SEC", "삼성전자"]) in d.tickers
+    assert all(8 <= len(kws) <= 20 for _, kws in d.topics) and all(1 <= len(a) <= 4 for _, _, a in d.tickers)
+
+
+def dict_dir(tmp_path, tickers: str) -> Path:
+    d = tmp_path / "dict"
+    d.mkdir()
+    (d / "tickers.csv").write_text("ticker,name,aliases\n" + tickers, encoding="utf-8")
+    (d / "topics.csv").write_text("# 주제\ntopic,keywords\nai,AI|GPU\n", encoding="utf-8-sig")  # Excel writes a BOM
+    (d / "cutoff.csv").write_text("phrase\nDisclaimer\n", encoding="utf-8")
+    return d
+
+
+@pytest.mark.parametrize("rows,words", [
+    ("AAPL-USQ,Apple,Apple\n# comment\nAAPL-USQ,Apple Inc,AAPL\n", ["tickers.csv 4행", "중복"]),
+    ("AAPL-USQ,Apple,Apple||AAPL\n", ["tickers.csv 2행", "별칭"]),
+    ("AAPL-USQ,Apple,\n", ["tickers.csv 2행", "별칭"]),
+    (",Apple,Apple\n", ["tickers.csv 2행", "ticker"]),
+    ("AAPL-USQ,Apple\n", ["tickers.csv 2행"]),
+])
+def test_load_dicts_errors(tmp_path, rows, words):
+    with pytest.raises(lr.LoaderError) as e:
+        lr.load_dicts(dict_dir(tmp_path, rows))
+    assert all(w in str(e.value) for w in words), str(e.value)
+
+
+def test_load_dicts_small_dir(tmp_path):
+    d = lr.load_dicts(dict_dir(tmp_path, "AAPL-USQ,Apple,Apple | AAPL\n"))
+    assert (d.tickers, d.topics, d.cutoff) == ([("AAPL-USQ", "Apple", ["Apple", "AAPL"])], [("ai", ["AI", "GPU"])],
+                                              ["Disclaimer"])
+
+
+def test_split_paragraphs_pages_numbering_and_merge():
+    body = ("[p.1]\nFirst paragraph of page one.\nThis line has no period but is long enough\nSource: Company data\n"
+            "[p.3]\nShort heading\nThird page text.\nFigure 2\n")
+    assert lr.split_paragraphs(body) == [
+        {"page": 1, "para_no": 1, "text": "First paragraph of page one."},
+        {"page": 1, "para_no": 2, "text": "This line has no period but is long enough Source: Company data"},
+        {"page": 3, "para_no": 3, "text": "Short heading"},
+        {"page": 3, "para_no": 4, "text": "Third page text. Figure 2"},
+    ]
+    assert lr.split_paragraphs("") == []
+
+
+@pytest.mark.parametrize("terms,text,hit", [
+    (["SEC"], "SEC raised DRAM prices", True),
+    (["SEC"], "the sec rules", False),
+    (["SEC"], "in the second half", False),
+    (["Apple"], "apple shipped more", True),
+    (["Apple"], "Pineapple exports", False),
+    (["Galaxy S"], "the Galaxy S series", True),
+    (["Galaxy S"], "the galaxy s series", True),
+    (["삼성전자"], "삼성전자는 올해", True),
+    (["하이닉스"], "SK하이닉스가", True),
+    (["Micron"], "Microns are small", False),
+    (["Micron"], "Micron's view", True),
+    (["AI"], "AIR quality", False),
+    (["AI"], "said the AI team", True),
+    (["AI"], "ai demand", False),
+    (["a.b"], "axb", False),
+])
+def test_compile_matcher(terms, text, hit):
+    assert bool(lr.compile_matcher(terms).search(text)) is hit
+
+
+DICTS = lr.Dicts(
+    tickers=[("AAPL-USQ", "Apple", ["Apple"]), ("005930-KRX", "Samsung Electronics", ["Samsung", "SEC"]),
+             ("006400-KRX", "Samsung SDI", ["Samsung SDI"])],
+    topics=[("smartwatch", ["smartwatch", "Apple Watch"]), ("tablet", ["tablet", "iPad"])],
+    cutoff=["Disclaimer"])
+
+
+def test_tag_text_longest_term_wins():
+    assert lr.compile_matcher(["Samsung", "Samsung SDI"]).search("Samsung SDI cells").group() == "Samsung SDI"
+    assert lr.tag_text("Samsung SDI ships cells.", DICTS) == (["006400-KRX"], [])
+    assert lr.tag_text("SEC and APPLE: Apple Watch, iPad and a tablet", DICTS) == (
+        ["005930-KRX", "AAPL-USQ"], ["smartwatch", "tablet"])
+    assert lr.tag_paragraphs([{"page": 2, "para_no": 1, "text": "iPad"}], DICTS) == [
+        {"page": 2, "para_no": 1, "text": "iPad", "tickers": [], "topics": ["tablet"]}]
+
+
+def test_derive_share_and_title():
+    texts = ["Apple grew.", "Apple again.", "Samsung once.", "smartwatch here.", "smartwatch two."] + ["plain."] * 5
+    paras = lr.tag_paragraphs([{"page": 1, "para_no": i, "text": t} for i, t in enumerate(texts, 1)], DICTS)
+    assert lr.derive(paras, "Samsung tablet outlook", DICTS) == {
+        "tickers": {"AAPL-USQ": 2, "005930-KRX": 1}, "topics": {"smartwatch": 2},
+        "doc_tickers": ["AAPL-USQ", "005930-KRX"], "doc_topics": ["smartwatch", "tablet"], "paragraphs": 10}
+    assert lr.derive(paras, None, DICTS)["doc_tickers"] == ["AAPL-USQ"]  # Samsung: 1 of 10 < 20%
+    fifteen = lr.tag_paragraphs([{"page": 1, "para_no": i, "text": "Apple." if i <= 3 else "x."}
+                                 for i in range(1, 16)], DICTS)
+    assert lr.derive(fifteen, None, DICTS)["doc_tickers"] == ["AAPL-USQ"]  # 3 of 15 is 20% (0.2 * 15 > 3 in floats)
+    assert lr.derive([], "", DICTS) == {"tickers": {}, "topics": {}, "doc_tickers": [], "doc_topics": [],
+                                        "paragraphs": 0}
 
 
 # ---------- extract ----------
@@ -564,7 +672,7 @@ def test_extract_cuts_heading_with_ligature(tmp_path, monkeypatch):
     pdf.write_bytes(b"%PDF-1.4 x")
     pages = ["p1", "body\nAnalyst Certi\ufb01cation\nI certify", "more"]
     monkeypatch.setattr(lr, "read_pages", lambda p: (pages, "fake"))
-    lr.extract_one(pdf, tmp_path / "st", False)
+    lr.extract_one(pdf, tmp_path / "st", False, lr.load_dicts().cutoff)
     meta = json.loads(next((tmp_path / "st").glob("*/meta.json")).read_text(encoding="utf-8"))
     assert meta["cut_heading"] is not None and "I certify" not in next((tmp_path / "st").glob("*/text.txt")).read_text(encoding="utf-8")
 

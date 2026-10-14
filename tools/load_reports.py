@@ -7,15 +7,18 @@ Write credentials come only from env vars (MI_DB_REPORTS_WRITE, MI_MINIO_WRITE) 
 from __future__ import annotations
 
 import argparse
+import csv
 import hashlib
 import importlib
 import json
+import math
 import os
 import re
 import sys
 import unicodedata
 import zipfile
 from collections import Counter
+from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 from urllib.parse import unquote, urlparse
@@ -24,6 +27,8 @@ ROOT = Path(__file__).resolve().parent.parent
 STAGING = ROOT / "staging"
 TABLE = "sales_team.nasdaq_report_doc"
 MINIO_ENV = "MI_MINIO_WRITE"
+DICT_DIR = Path(__file__).resolve().parent / "dict"
+DOC_SHARE = 0.2  # a tag is document-level when it is in >= 20% of the paragraphs (or in the title)
 MONTHS = {m: i for i, m in enumerate(
     ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"), 1)}
 
@@ -97,7 +102,7 @@ def file_sha256(path: Path) -> str:
 
 # ---------- text cleanup (pure functions on page strings) ----------
 
-CUT_RE = re.compile(r"^[ \t]*(analyst certification|important disclosures)\b", re.I | re.M)
+HEADING_MAX = 60  # a cutoff line longer than this is a body sentence, not a heading
 PAGE_NO_RE = re.compile(r"^\s*\d{1,4}\s*$")
 BULLET_RE = re.compile(r"^([•●▪■◦·*\-–]|\d{1,2}[.)])\s")
 PARA_END = (".", ":", "?", "!")
@@ -119,13 +124,20 @@ def strip_repeated_lines(pages: list[str], threshold: float = 0.6) -> list[str]:
     return ["\n".join(line for line in page.splitlines() if _norm(line) not in drop) for page in pages]
 
 
-def cut_disclosure(pages: list[str]) -> tuple[list[str], str | None]:
-    """Cut everything from the first `Analyst Certification` / `Important Disclosures` line on page 2+."""
+def cut_disclosure(pages: list[str], phrases: list[str]) -> tuple[list[str], str | None]:
+    """Cut everything from the first heading on page 2+: a line of <= HEADING_MAX characters starting with a
+    `tools/dict/cutoff.csv` phrase (any case). Returns (kept pages, the heading as written in the PDF)."""
+    if not phrases:
+        return pages, None
+    head_re = re.compile(r"[ \t]*(" + "|".join(re.escape(p) for p in sorted(phrases, key=len, reverse=True))
+                         + r")(?![A-Za-z0-9])", re.I)
     for i, page in enumerate(pages[1:], 1):  # page 1 often says "see important disclosures": never cut there
-        m = CUT_RE.search(page)
-        if m:
-            head = page[:m.start()].strip()
-            return pages[:i] + ([head] if head else []), m.group(1)
+        lines = page.splitlines()
+        for j, line in enumerate(lines):
+            m = head_re.match(line)
+            if m and len(line.strip()) <= HEADING_MAX:
+                head = "\n".join(lines[:j]).strip()
+                return pages[:i] + ([head] if head else []), m.group(1)
     return pages, None
 
 
@@ -173,6 +185,134 @@ def smartphone_hits(text: str) -> int:
     return sum(low.count(w) for w in SMARTPHONE_WORDS)
 
 
+# ---------- dictionaries, paragraphs, tagging (pure; recomputed from text.txt on every run) ----------
+
+@dataclass
+class Dicts:
+    """`tools/dict/*.csv`: tickers [(ticker, name, [aliases])], topics [(topic, [keywords])], cutoff [phrase]."""
+    tickers: list
+    topics: list
+    cutoff: list
+
+    def __post_init__(self):
+        self.ticker_tags = _tagger([(t, aliases) for t, _, aliases in self.tickers])
+        self.topic_tags = _tagger(self.topics)
+
+
+def _read_csv(path: Path, cols: tuple[str, ...]) -> list[tuple[int, list[str]]]:
+    """(line number, cells) for each row after the header; blank and `#` comment lines are skipped."""
+    if not path.exists():
+        raise LoaderError(f"사전 파일이 없습니다: {path}")
+    with open(path, encoding="utf-8-sig", newline="") as f:  # -sig: Excel's "CSV UTF-8" starts with a BOM
+        r = csv.reader(f)
+        rows = [(r.line_num, [c.strip() for c in row]) for row in r]
+    rows = [(n, row) for n, row in rows if any(row) and not row[0].startswith("#")]
+    if not rows or tuple(rows[0][1]) != cols:
+        raise LoaderError(f"{path.name}: 첫 줄(주석 제외)은 {','.join(cols)} 이어야 합니다")
+    for n, row in rows[1:]:
+        if len(row) != len(cols):
+            raise LoaderError(f"{path.name} {n}행: 칸이 {len(cols)}개({','.join(cols)})여야 합니다")
+    return rows[1:]
+
+
+def load_dicts(dict_dir: Path = DICT_DIR) -> Dicts:
+    """Read and check the three dictionaries; an error names the file and line."""
+    parsed = {}
+    for name, cols, what in (("tickers.csv", ("ticker", "name", "aliases"), "별칭"),
+                             ("topics.csv", ("topic", "keywords"), "키워드")):
+        seen, out = set(), []
+        for n, row in _read_csv(dict_dir / name, cols):
+            terms = [x.strip() for x in row[-1].split("|")]
+            err = (f"{cols[0]} 칸이 비어 있습니다" if not row[0] else f"{cols[0]} 중복 ({row[0]})" if row[0] in seen
+                   else f"{what}에 빈 값이 있습니다 (| 앞뒤 확인)" if not all(terms) else None)
+            if err:
+                raise LoaderError(f"{name} {n}행: {err}")
+            seen.add(row[0])
+            out.append((*row[:-1], terms))
+        parsed[name] = out
+    return Dicts(parsed["tickers.csv"], parsed["topics.csv"],
+                 [row[0] for _, row in _read_csv(dict_dir / "cutoff.csv", ("phrase",))])
+
+
+PAGE_MARK_RE = re.compile(r"^\[p\.(\d+)\]$")
+MERGE_MAX = 40
+HANGUL_RE = re.compile(r"[\uac00-\ud7a3]")
+
+
+def split_paragraphs(body: str) -> list[dict]:
+    """text.txt -> [{page, para_no, text}], para_no counting from 1 across pages. A line under MERGE_MAX characters
+    not ending in . ? ! (table fragment, caption) joins the paragraph before it, unless it opens a page."""
+    paras, page, first = [], 1, True
+    for line in body.splitlines():
+        line = line.strip()
+        m = PAGE_MARK_RE.match(line)
+        if m:
+            page, first = int(m.group(1)), True
+        elif line:
+            if not first and len(line) < MERGE_MAX and not line.endswith((".", "?", "!")):
+                paras[-1]["text"] += " " + line
+            else:
+                paras.append({"page": page, "para_no": len(paras) + 1, "text": line})
+            first = False
+    return paras
+
+
+def compile_matcher(terms: list[str]) -> re.Pattern:
+    """One pattern for all terms, longest first. English terms match whole words only (no letter or digit on
+    either side); Korean terms match anywhere. Terms of 4+ characters ignore case, shorter ones (SEC, AI) do not."""
+    def alt(t: str) -> str:  # [Aa] classes, not (?i:): they keep re's skip-on-first-character fast path (9x here)
+        return re.escape(t) if len(t) < 4 else "".join(
+            f"[{c.upper()}{c.lower()}]" if c.upper() != c.lower() else re.escape(c) for c in t)
+    terms = sorted(set(terms), key=lambda t: (-len(t), t))
+    en = "|".join(alt(t) for t in terms if not HANGUL_RE.search(t))
+    ko = "|".join(alt(t) for t in terms if HANGUL_RE.search(t))
+    parts = ([rf"(?<![A-Za-z0-9])(?:{en})(?![A-Za-z0-9])"] if en else []) + ([ko] if ko else [])
+    return re.compile("|".join(parts) or r"(?!)")
+
+
+def _key(term: str) -> str:
+    return term.lower() if len(term) >= 4 else term  # compile_matcher's case rule
+
+
+def _tagger(pairs: list) -> tuple[re.Pattern, dict]:
+    """[(tag, terms)] -> (one pattern over every term, term key -> tags)."""
+    index: dict[str, set] = {}
+    for tag, terms in pairs:
+        for t in terms:
+            index.setdefault(_key(t), set()).add(tag)
+    return compile_matcher([t for _, terms in pairs for t in terms]), index
+
+
+def tag_text(text: str, dicts: Dicts) -> tuple[list[str], list[str]]:
+    """(tickers, topics) whose terms occur in text, sorted and unique. Where terms overlap the longest one wins
+    (`Samsung SDI` tags Samsung SDI only, not also Samsung Electronics)."""
+    def tags(tagger) -> list[str]:
+        pattern, index = tagger
+        return sorted({tag for m in pattern.finditer(text) for tag in index[_key(m.group())]})
+    return tags(dicts.ticker_tags), tags(dicts.topic_tags)
+
+
+def tag_paragraphs(paras: list[dict], dicts: Dicts) -> list[dict]:
+    out = []
+    for p in paras:
+        tickers, topics = tag_text(p["text"], dicts)
+        out.append({**p, "tickers": tickers, "topics": topics})
+    return out
+
+
+def derive(paras: list[dict], title: str | None, dicts: Dicts) -> dict:
+    """Paragraph counts per ticker/topic and the document-level tags: those in >= DOC_SHARE of the paragraphs or
+    in the title, most paragraphs first."""
+    need = max(1, math.ceil(round(DOC_SHARE * len(paras), 9)))  # round: 0.2 * 15 is 3.0000000000000004
+    out: dict = {"paragraphs": len(paras)}
+    for key, in_title in zip(("tickers", "topics"), tag_text(title or "", dicts)):
+        counts = Counter(t for p in paras for t in p[key])
+        order = sorted(set(counts) | set(in_title), key=lambda t: (-counts[t], t))
+        out[key] = {t: counts[t] for t in order if counts[t]}
+        out["doc_" + key] = [t for t in order if counts[t] >= need or t in in_title]
+    return out
+
+
 # ---------- extract ----------
 
 def read_json(path: Path):
@@ -214,7 +354,7 @@ def read_text_source(path: Path, info: dict) -> tuple[list[str], str]:
     return [text], "text"
 
 
-def extract_one(pdf: Path, staging: Path, force: bool) -> str:
+def extract_one(pdf: Path, staging: Path, force: bool, cutoff: list[str]) -> str:
     info = parse_filename(pdf.name)
     sha = file_sha256(pdf)
     rid = sha[:12]
@@ -224,8 +364,8 @@ def extract_one(pdf: Path, staging: Path, force: bool) -> str:
         return f"skip {rid} (이미 추출됨) {pdf.name}"
     is_text = pdf.suffix.lower() in TEXT_EXTS
     raw, extractor = read_text_source(pdf, info) if is_text else read_pages(pdf)
-    raw = [unicodedata.normalize("NFKC", p) for p in raw]  # before the cut: ligatures/NBSP would defeat CUT_RE
-    pages, heading = (raw, None) if is_text else cut_disclosure(strip_repeated_lines(raw))  # articles: no cleanup
+    raw = [unicodedata.normalize("NFKC", p) for p in raw]  # before the cut: ligatures/NBSP would defeat the match
+    pages, heading = (raw, None) if is_text else cut_disclosure(strip_repeated_lines(raw), cutoff)  # articles: none
     body = render_body(pages, not is_text)  # articles keep lone-number lines
     meta = {
         "id": rid,
@@ -266,6 +406,7 @@ def unzip_to_inbox(zp: Path, staging: Path) -> Path:
 
 
 def cmd_extract(staging: Path, paths: list[Path], force: bool) -> int:
+    cutoff = load_dicts().cutoff
     pdfs: list[Path] = []
     for p in paths:
         if p.suffix.lower() == ".zip" and p.is_file():
@@ -274,7 +415,7 @@ def cmd_extract(staging: Path, paths: list[Path], force: bool) -> int:
     failed = 0
     for pdf in pdfs:
         try:
-            print(extract_one(pdf, staging, force))
+            print(extract_one(pdf, staging, force, cutoff))
         except LoaderError:
             raise
         except Exception as e:  # one bad PDF must not stop the batch

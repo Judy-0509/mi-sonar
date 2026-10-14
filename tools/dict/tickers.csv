@@ -1,0 +1,139 @@
+# 티커 사전: 문단에 별칭(aliases) 중 하나가 나오면 그 티커를 붙인다. 별칭은 | 로 구분한다.
+# 4자 이상 별칭은 대소문자를 무시하고 3자 이하(SEC·TDK)는 대소문자까지 같아야 한다. 영문은 단어 단위로만 찾고(Micron 은 Microns 에 안 걸림) 한글은 글자 그대로 찾는다.
+# 겹치면 긴 별칭이 이긴다(Samsung SDI 는 삼성SDI만). 일반 단어(Micro·Sunny·Serve)는 별칭으로 쓰지 않는다.
+# JPM: 증권사 자기 표기(J.P. Morgan·JPMorgan)에 걸리지 않게 JPMorgan Chase 만 쓴다.
+ticker,name,aliases
+000100-SHE,TCL Technology,TCL Technology|TCL CSOT|CSOT
+000270-KRX,Kia,Kia|기아
+000660-KRX,SK hynix,SK hynix|Hynix|SKH|하이닉스
+000725-SHE,BOE Technology,BOE|BOE Technology
+005380-KRX,Hyundai Motor,Hyundai Motor|Hyundai|현대차|현대자동차
+005930-KRX,Samsung Electronics,Samsung|Samsung Electronics|SEC|삼성전자
+009150-KRX,Samsung Electro-Mechanics,Samsung Electro-Mechanics|SEMCO|삼성전기
+012330-KRX,Hyundai Mobis,Hyundai Mobis|Mobis|현대모비스
+034220-KRX,LG Display,LG Display|LGD|LG디스플레이
+035420-KRX,NAVER,NAVER|네이버
+992-HK,Lenovo,Lenovo|레노버
+1070-HK,TCL Electronics,TCL Electronics
+2317-TW,Hon Hai,Hon Hai|Foxconn|홍하이
+2354-TW,Foxconn Technology,Foxconn Technology
+2454-TW,MediaTek,MediaTek|MTK|미디어텍
+3008-TW,Largan Precision,Largan|Largan Precision
+AAPL-USQ,Apple,Apple|AAPL|애플
+AMAT-USQ,Applied Materials,Applied Materials|AMAT
+APH-USQ,Amphenol,Amphenol
+ASML-USQ,ASML,ASML
+GLW-USQ,Corning,Corning
+JBL-USQ,Jabil,Jabil
+JPM-USQ,JPMorgan Chase,JPMorgan Chase
+KLAC-USQ,KLA,KLA|KLA Corp
+LRCX-USQ,Lam Research,Lam Research
+MU-USQ,Micron Technology,Micron|Micron Technology
+NVDA-USQ,NVIDIA,NVIDIA|NVDA|엔비디아
+ON-USQ,onsemi,onsemi|ON Semiconductor
+QCOM-USQ,Qualcomm,Qualcomm|QCOM|퀄컴
+TSM-USQ,TSMC,TSMC|Taiwan Semiconductor
+TXN-USQ,Texas Instruments,Texas Instruments|TXN
+UMC-USQ,United Microelectronics,UMC|United Microelectronics
+2018-HK,AAC Technologies,AAC Technologies|AAC
+HIMX-USQ,Himax,Himax
+002129-SHE,TCL Zhonghuan,TCL Zhonghuan|TZE
+2382-HK,Sunny Optical,Sunny Optical
+285-HK,BYD Electronic,BYD Electronic|BYDE
+011070-KRX,LG Innotek,LG Innotek|LGIT|LG이노텍
+108320-KRX,LX Semicon,LX Semicon|LX세미콘
+NXPI-USQ,NXP Semiconductors,NXP|NXP Semiconductors
+002475-SHE,Luxshare Precision,Luxshare|Luxshare Precision
+002594-SHE,BYD,BYD
+603501-CN,OmniVision,OmniVision|Will Semiconductor
+601138-CN,Foxconn Industrial Internet,Foxconn Industrial Internet|Industrial Fulian
+1810-HK,Xiaomi,Xiaomi|샤오미
+3711-TW,ASE Technology,ASE|ASE Technology|ASE Holding
+300750-SHE,CATL,CATL|Contemporary Amperex
+SONY-USQ,Sony,Sony|소니
+688036-CN,Transsion,Transsion|Tecno|Infinix
+GFS-USQ,GlobalFoundries,GlobalFoundries|GFS
+MBLY-USQ,Mobileye,Mobileye
+AMD-USQ,AMD,AMD|Advanced Micro Devices
+AVGO-USQ,Broadcom,Broadcom|AVGO
+INTC-USQ,Intel,Intel|INTC
+ARM-USQ,Arm,Arm|ARM|Arm Holdings
+MRVL-USQ,Marvell,Marvell|Marvell Technology
+MSFT-USQ,Microsoft,Microsoft|MSFT|마이크로소프트
+GOOGL-USQ,Alphabet,Alphabet|Google|구글
+AMZN-USQ,Amazon,Amazon|AWS|아마존
+META-USQ,Meta Platforms,Meta|Meta Platforms|Facebook
+SMCI-USQ,Super Micro Computer,Super Micro|Supermicro|SMCI
+DELL-USQ,Dell Technologies,Dell|Dell Technologies
+WDC-USQ,Western Digital,Western Digital|WDC
+SNDK-USQ,SanDisk,SanDisk
+ALAB-USQ,Astera Labs,Astera Labs|Astera
+CRDO-USQ,Credo,Credo|Credo Technology
+981-HK,SMIC,SMIC
+042700-KRX,Hanmi Semiconductor,Hanmi Semiconductor|Hanmi|한미반도체
+ATEYY-USQ,Advantest,Advantest
+SWKS-USQ,Skyworks,Skyworks|Skyworks Solutions
+CRUS-USQ,Cirrus Logic,Cirrus Logic|Cirrus
+SYNA-USQ,Synaptics,Synaptics
+006400-KRX,Samsung SDI,Samsung SDI|삼성SDI
+066570-KRX,LG Electronics,LG Electronics|LGE|LG전자
+002241-SHE,Goertek,Goertek
+3034-TW,Novatek,Novatek
+2379-TW,Realtek,Realtek
+4938-TW,Pegatron,Pegatron
+2382-TW,Quanta Computer,Quanta|Quanta Computer
+3231-TW,Wistron,Wistron
+OLED-USQ,Universal Display,Universal Display|UDC
+2409-TW,AUO,AUO|AU Optronics
+000050-SHE,Tianma,Tianma|Tianma Microelectronics
+HPQ-USQ,HP Inc,HP Inc|HP|HPQ
+MRAAY-USQ,Murata,Murata|Murata Manufacturing
+TTDKY-USQ,TDK,TDK
+GRMN-USQ,Garmin,Garmin
+ZEPP-USQ,Zepp Health,Zepp|Zepp Health|Amazfit
+SNAP-USQ,Snap,Snap Inc|Snapchat
+KOPN-USQ,Kopin,Kopin
+VUZI-USQ,Vuzix,Vuzix
+CSIOY-USQ,Casio,Casio|G-Shock
+TSLA-USQ,Tesla,Tesla|TSLA|테슬라
+GM-USQ,General Motors,General Motors
+F-USQ,Ford,Ford|Ford Motor
+STLA-USQ,Stellantis,Stellantis
+VOW3-DE,Volkswagen,Volkswagen|VW
+MBG-DE,Mercedes-Benz,Mercedes-Benz|Mercedes
+BMW-DE,BMW,BMW
+RIVN-USQ,Rivian,Rivian
+NIO-USQ,NIO,NIO
+XPEV-USQ,XPeng,XPeng
+LI-USQ,Li Auto,Li Auto
+175-HK,Geely,Geely|Zeekr
+9863-HK,Leapmotor,Leapmotor
+APTV-USQ,Aptiv,Aptiv
+MGA-USQ,Magna,Magna|Magna International
+CON-DE,Continental,Continental AG
+GNTX-USQ,Gentex,Gentex
+VC-USQ,Visteon,Visteon
+AMBA-USQ,Ambarella,Ambarella
+INDI-USQ,indie Semiconductor,indie Semiconductor|indie Semi
+IFX-DE,Infineon,Infineon
+STM-USQ,STMicroelectronics,STMicroelectronics|STMicro|STM
+HSAI-USQ,Hesai,Hesai
+373220-KRX,LG Energy Solution,LG Energy Solution|LGES|LG에너지솔루션
+204320-KRX,HL Mando,HL Mando|Mando|HL만도
+TM-USQ,Toyota,Toyota|도요타
+HMC-USQ,Honda,Honda|Honda Motor
+DNZOY-USQ,Denso,Denso
+RNECY-USQ,Renesas,Renesas|Renesas Electronics
+9880-HK,UBTech,UBTech|UBTech Robotics
+TER-USQ,Teradyne,Teradyne|Universal Robots
+ROK-USQ,Rockwell Automation,Rockwell Automation|Rockwell
+SYM-USQ,Symbotic,Symbotic
+002050-SHE,Sanhua,Sanhua|Sanhua Intelligent Controls
+601689-CN,Tuopu,Tuopu|Tuopu Group
+300124-SHE,Inovance,Inovance
+002747-SHE,Estun,Estun|Estun Automation
+688017-CN,Leader Harmonious Drive,Leader Harmonious Drive|Leaderdrive
+SERV-USQ,Serve Robotics,Serve Robotics
+HSYDF-USQ,Harmonic Drive,Harmonic Drive|Harmonic Drive Systems
+FANUY-USQ,Fanuc,Fanuc
+YASKY-USQ,Yaskawa,Yaskawa|Yaskawa Electric
