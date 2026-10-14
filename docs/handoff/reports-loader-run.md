@@ -4,14 +4,17 @@
 
 About 54 broker research PDFs (English) are on this PC. `tools/load_reports.py` turns the smartphone-relevant
 ones into rows of `sales_team.nasdaq_report_doc`: one row per report with a cleaned English body (`[p.N]` page
-markers), Korean + English summary and keywords. The program does the mechanical work. You (the agent) make the
-judgements and write them into two small JSON files per report. You never write or edit body text.
+markers), Korean + English summary and keywords. Each loaded report's paragraphs also go to
+`sales_team.nasdaq_report_para`, tagged with tickers and topics by the dictionaries in `tools/dict/`. The program does
+the mechanical work, including all ticker and topic tagging. You (the agent) make the judgements and write them into
+two small JSON files per report. You never write or edit body text.
 
 | Stage | Who | What |
 |---|---|---|
 | 1. extract | program | `extract <PDF folder>` → `staging/<id>/text.txt` + `meta.json` |
 | 2. triage | you | `staging/<id>/triage.json` for every report, then `triage-report` → `staging/triage.md` for the owner |
 | 3. annotate | you | `staging/<id>/annotate.json` for every report whose decision is `load` |
+| 3b. check tags | you + owner | `paragraphs <id>`: each paragraph's tickers and topics; the owner fixes `tools/dict/*.csv` |
 | 4. load | program | `load --local` now; `load --dsn-env MI_DB_REPORTS_WRITE` once the company table exists |
 
 `<id>` is the first 12 hex characters of the PDF's sha256. `status` shows every report on one line at any time.
@@ -58,7 +61,7 @@ Check the output:
 - Firm, ticker or title in `status` is clearly wrong (misparsed name) → with the owner's OK rename the PDF to
   `DD-Mon-YYYY_HH-MM-SS-<TICKER>-<MARKET>-<FIRM>-<Title_With_Underscores>.pdf` and run
   `python tools/load_reports.py extract --force "<renamed file>"`.
-- `cut=-` (no `Analyst Certification` / `Important Disclosures` heading found) or `body` much smaller than half of
+- `cut=-` (no heading from `tools/dict/cutoff.csv` found) or `body` much smaller than half of
   `pages` → open `text.txt`. If the cut is clearly wrong (body missing, or pages of legal text left in), report the id
   and skip it.
 
@@ -109,7 +112,6 @@ For each report whose `status` line says `decision=load` (or `load*`), read the 
   "title": "Micron Technology: Mgmt Meeting - CY27 and CY28 Both Significantly Tight",
   "analyst": "Jane Doe",
   "thesis": "AI 서버 HBM과 스마트폰 LPDDR5X 수요로 메모리 공급 부족이 2028년까지 이어진다.",
-  "scope": ["vendor:Micron"],
   "summary_ko": [
     "경영진은 2027~2028년 메모리 공급이 크게 부족할 것으로 본다.",
     "2027년 DRAM 비트 수요는 전년 대비 18% 늘어난다 [p.2].",
@@ -119,7 +121,6 @@ For each report whose `status` line says `decision=load` (or `load*`), read the 
   "summary_en": "Management expects memory supply to stay significantly tight through CY28, helped by rising smartphone LPDDR5X content.",
   "keywords_ko": ["HBM", "모바일 DRAM", "공급 부족", "목표주가"],
   "keywords_en": ["HBM", "LPDDR5X", "DRAM supply", "price target"],
-  "topics": ["메모리", "스마트폰"],
   "key_numbers": "CY27 DRAM bit demand +18% YoY [p.2]; average smartphone DRAM content 9.5GB in 2027 [p.3]"
 }
 ```
@@ -130,21 +131,13 @@ For each report whose `status` line says `decision=load` (or `load*`), read the 
 | `ticker` | Only if the filename had none and the report is about one listed company. ≤ 20 characters. Otherwise leave the key out. |
 | `analyst` | Lead analyst if the name is visible. ≤ 100 characters. Otherwise leave the key out. |
 | `thesis` | Required. The report's own claim in one Korean sentence on one line, 10 to 300 characters. Not a topic label. |
-| `scope` | Required. 1 to 6 strings saying what the report is about (see the scope rule below). |
 | `summary_ko` | 3 to 6 strings, each one Korean sentence on one line. Line 1 restates the thesis or the main claim. Lines 2 and after are supporting points and each contains its `[p.N]`. |
 | `summary_en` | One English sentence on one line. |
 | `keywords_ko`, `keywords_en` | 1 to 10 each. No commas inside a keyword. Company, product and technology names people would search for. |
-| `topics` | 1 or more, no duplicates, only from: `스마트폰, AP, 메모리, 카메라, 디스플레이, 모뎀, 파운드리, OEM, 공급망, 거시, 스마트워치`. |
 | `key_numbers` | The key figures, copied exactly with unit and period, each followed by its `[p.N]`. `""` if the report has none. |
 
-Scope rule (each value exactly one of these forms; a report may have several):
-
-- `market` = 시장 전반: the smartphone / smartwatch market as a whole is the subject.
-- `vendor:<Name>` = 특정 업체가 주제: that company is the subject, not just mentioned (e.g. `vendor:Apple`). Free text, no commas.
-- `band:<high|mid|low>` = 특정 가격대: a specific price band is the subject. Default cut-offs: high ≥ $600, mid $200–599,
-  low < $200 (the owner may change them).
-
-Example: a premium-phone market report centred on Apple → `["market", "vendor:Apple", "band:high"]`.
+Do not write `scope` or `topics`: the program derives the report's tickers and topics from the paragraph tags
+(section 3b). Either key in `annotate.json` is an error (`모르는 키`).
 
 For `kind` = `firm_analysis`: `keywords_en` MUST include every vendor name and every country / region named in the article (for example `Apple, Huawei, China, India`) and `keywords_ko` their Korean forms; `key_numbers` quotes every shipment and growth figure verbatim with `[p.1]`.
 
@@ -157,11 +150,41 @@ Reading rules:
   into any file; the body is stored exactly as the program extracted it.
 - Use only what the report says. No outside knowledge, no guesses. Copy numbers exactly.
 - Korean summaries in plain Korean; keep English product and company names as they are.
-- Keep to the fixed topics list; do not invent topics.
 
 ```powershell
 python tools/load_reports.py status   # every load report shows annotate=ok; fix every "! annotate.json:" line
 ```
+
+## 3b. Check the tags (`paragraphs <id>`)
+
+Nobody judges tickers or topics. The program splits `text.txt` into paragraphs (one line = one paragraph; a line under
+40 characters not ending in `.` `?` `!` joins the paragraph before it) and tags each paragraph with the dictionaries.
+A report's tickers (DB column `scope`) and topics are those in at least 20% of its paragraphs or in its title. `status`
+shows them on every line (`tickers=… topics=… paras=…`) and `triage.md` has the columns `티커(자동)` / `주제(자동)`.
+
+```powershell
+python tools/load_reports.py paragraphs 3f9a    # the id or its first characters
+```
+
+It prints one row per paragraph (number, page, tickers, topics, first 100 characters), then the counts per ticker and
+topic, the report-level result, the cut heading and pages kept / total. This is how the owner verifies a report.
+
+Wrong or missing tags are fixed in the dictionaries, never in JSON files. The agent drafted them (2026-10-14); from now
+on only the owner edits them:
+
+- `tools/dict/tickers.csv` (`ticker,name,aliases`): aliases separated by `|`,
+  e.g. `005930-KRX,Samsung Electronics,Samsung|Samsung Electronics|SEC|삼성전자`.
+- `tools/dict/topics.csv` (`topic,keywords`): the 7 topics `ai, smartphone, auto, smartwatch, smartglass, tablet,
+  humanoid` and their keywords.
+- `tools/dict/cutoff.csv` (`phrase`): headings where the disclosure tail starts (page 2+, a line of ≤ 60 characters
+  starting with the phrase, any case).
+
+Matching: English terms match whole words only (`Micron` does not hit `Microns`), Korean terms match anywhere. Terms
+of 4+ characters ignore case; shorter ones (`SEC`, `AI`) must match exactly. Where terms overlap the longer one wins.
+Lines starting with `#` are comments; save as UTF-8. A dictionary edit applies on the next `status` / `paragraphs` /
+`load` without re-extracting, because paragraphs and tags are recomputed from `text.txt` every run. Exceptions: a
+`cutoff.csv` change needs `extract --force` for the affected reports, and reports already loaded are not changed.
+Commit the CSVs: they hold names and keywords only, no report content.
 
 ## 4. Load
 
@@ -172,7 +195,7 @@ python tools/load_reports.py load --local
 python tools/load_reports.py load --local    # second run: every line says "exists"
 ```
 
-This uses an embedded PostgreSQL in `staging/localpg/` (schema `sales_team` and the table are created there) and no
+This uses an embedded PostgreSQL in `staging/localpg/` (schema `sales_team` and both tables are created there) and no
 MinIO. No company system is touched. Exit code 1 with `wait <id>` lines means some `annotate.json` is missing or
 invalid; fix it and run again.
 
@@ -189,8 +212,9 @@ python tools/load_reports.py load --dsn-env MI_DB_REPORTS_WRITE
 Remove-Item Env:MI_DB_REPORTS_WRITE, Env:MI_MINIO_WRITE
 ```
 
-- If the table does not exist yet the command stops with `테이블이 아직 없습니다` and writes nothing.
-- Each report is one transaction: the row is inserted first, then the PDF is uploaded; an upload failure rolls the row back. A `FAIL <id>` line does not stop the others.
+- If either table (`nasdaq_report_doc`, `nasdaq_report_para`) does not exist yet the command stops with
+  `테이블이 아직 없습니다`, naming the table, and writes nothing.
+- Each report is one transaction: the report row and its paragraph rows are inserted first, then the PDF is uploaded; an upload failure rolls the rows back. A `FAIL <id>` line does not stop the others.
 - Safe to re-run: a report whose `file_sha256` is already in the table is skipped and not uploaded again.
 - `--no-minio` loads rows without uploading PDFs. Use it only if the owner says so.
 
@@ -200,6 +224,32 @@ Then check what colleagues will see (read-only account):
 python skills/mi-sonar/scripts/query.py sources    # reports: 설정됨
 python skills/mi-sonar/scripts/query.py sql reports "SELECT firm, COUNT(*) AS n, MAX(published_on) AS latest FROM sales_team.nasdaq_report_doc GROUP BY firm ORDER BY n DESC"
 ```
+
+## DBaaS request (pending)
+
+The owner sends this; the agent does not. The `thesis` / `scope` columns of `nasdaq_report_doc` are already requested.
+Add the paragraph table to the pending request:
+
+```
+[추가 요청] sales_team 스키마에 테이블 1개 생성 (nasdaq_report_doc 의 문단 테이블)
+1. 테이블 이름: sales_team.nasdaq_report_para
+2. DDL:
+CREATE TABLE IF NOT EXISTS sales_team.nasdaq_report_para (
+  id SERIAL PRIMARY KEY,
+  doc_id INTEGER NOT NULL REFERENCES sales_team.nasdaq_report_doc(id) ON DELETE CASCADE,
+  page INTEGER NOT NULL,
+  para_no INTEGER NOT NULL,
+  tickers VARCHAR(300),
+  topics VARCHAR(100),
+  text TEXT NOT NULL,
+  UNIQUE (doc_id, para_no)
+);
+3. 인덱스: 추가 요청 없음 (UNIQUE (doc_id, para_no) 가 만드는 것만)
+용도: 증권사 레포트 본문을 문단 단위로 저장 (레포트당 수십 행, 주 약 150건). 레포트 행을 지우면 문단도 함께 지워짐.
+```
+
+Grants are requested separately, as for the report table: the write account needs SELECT, INSERT and USAGE on
+`sales_team.nasdaq_report_para_id_seq`; the read account (`MI_DB_SMARTPHONE`) needs SELECT.
 
 ## Report back
 

@@ -29,9 +29,11 @@
 - 외래키·조인이 없어 DBaaS 팀 요청이 테이블 1개로 끝나고, 동료의 쿼리도 단순합니다.
 - 새 스키마를 요청하지 않고 기존 `sales_team` 스키마에 둡니다.
 
+(2026-10-14 변경: 주 150건 규모가 되어 문단 테이블 `nasdaq_report_para` 를 추가했습니다. 6절.)
+
 ## 3. 테이블 설계
 
-먼저 용어입니다 (7절에서도 씁니다).
+먼저 용어입니다 (8절에서도 씁니다).
 
 - **기본키**: 행의 주민번호입니다. 절대 겹치지 않아서 같은 행이 중복 입력되는 것을 막습니다.
 - **외래키**: 다른 테이블 행의 주민번호를 적어둔 칸입니다. 주인 없는 행(고아 행)을 막습니다. 이 테이블에는 없습니다.
@@ -68,7 +70,7 @@ CREATE TABLE sales_team.nasdaq_report_doc (
 | `published_on` | 발행일 | 파일명 |
 | `title` | 제목 (영어) | 파일명. 없거나 잘렸으면 에이전트가 1쪽에서 |
 | `report_type` | 레포트 종류 (분류의 `kind`) | 에이전트 |
-| `topics` | 주제. 고정 목록(5절)에서 고른 값을 쉼표로 이은 문자열 | 에이전트 |
+| `topics` | 주제. 7개 주제 중 레포트에 해당하는 것을 쉼표로 이은 문자열 (예: `smartphone, ai`) | 프로그램 (사전 집계, 6절) |
 | `analyst` | 대표 애널리스트 (보이면) | 에이전트 |
 | `pages` | PDF 전체 쪽수 | 프로그램 |
 | `minio_key` | 원본 PDF 위치 `reports/<증권사>/<발행일>_<slug>.pdf` | 프로그램 |
@@ -82,7 +84,7 @@ CREATE TABLE sales_team.nasdaq_report_doc (
 | `ticker` | 티커 (예: MU). 산업 레포트는 비어 있음 | 파일명, 없으면 에이전트 |
 | `market` | 거래소 코드 (예: USQ) | 파일명 |
 
-- `topics`, `keywords` 는 목록(배열)이 아니라 `메모리, 스마트폰` 같은 쉼표로 이은 문자열입니다. 찾을 때는 `ILIKE '%메모리%'` 를 씁니다.
+- `topics`, `keywords` 는 목록(배열)이 아니라 `smartphone, ai` 같은 쉼표로 이은 문자열입니다. 찾을 때는 `LIKE '%smartphone%'`, `ILIKE '%메모리%'` 처럼 씁니다.
 - `slug` 는 제목의 영문·숫자를 `_` 로 이은 앞 60자 + PDF 지문 앞 6자리입니다 (예: `reports/JPMorgan/2026-10-06_Micron_Technology_Mgmt_Mtg_a1b2c3.pdf`). 지문을 붙여 같은 날 같은 제목의 두 레포트가 서로 덮어쓰지 않게 합니다.
 - **인덱스는 지금 요청하지 않습니다.** 수십 건이라 순차 검색(ILIKE)으로 충분합니다. 서버에 pg_trgm(부분일치 색인)과 pgvector(의미 검색)가 이미 있으므로, 건수가 늘어 느려지면 그때 요청합니다.
 
@@ -90,7 +92,7 @@ CREATE TABLE sales_team.nasdaq_report_doc (
 
 PDF에서 뽑은 글자를 읽기 좋은 본문으로 만드는 규칙입니다. 프로그램(`extract`)이 모든 레포트에 똑같이 적용합니다. 근거는 사내 추출 점검(54건, 중앙값 13쪽) 결과입니다.
 
-1. **면책·공시 꼬리 자르기**: 2쪽부터 보아, `Analyst Certification` 또는 `Important Disclosures` 로 시작하는 줄이 처음 나오는 곳(둘 중 먼저 나오는 것)부터 끝까지 버립니다. 그 쪽에서 제목 앞에 있는 글은 남깁니다. 1쪽은 "공시는 몇 쪽 참조" 같은 문구가 흔해서 보지 않습니다. 이 꼬리는 보통 전체 쪽수의 35~60%입니다.
+1. **면책·공시 꼬리 자르기**: 2쪽부터 보아, `tools/dict/cutoff.csv` 의 구절(`Analyst Certification`, `Important Disclosures`, `Disclaimer` 등)로 시작하는 60자 이하 줄(제목)이 처음 나오는 곳부터 끝까지 버립니다. 60자를 넘는 줄은 본문 문장으로 보고 자르지 않습니다 (2026-10-14 변경, 6절). 그 쪽에서 제목 앞에 있는 글은 남깁니다. 1쪽은 "공시는 몇 쪽 참조" 같은 문구가 흔해서 보지 않습니다. 이 꼬리는 보통 전체 쪽수의 35~60%입니다.
 2. **반복되는 머리말·꼬리말 지우기**: 전체 쪽의 60% 이상에 똑같이 나오는 줄(예: `Nomura | Largan Precision 8 October 2026`)을 모든 쪽에서 지웁니다. 꼬리를 자르기 전에 전체 쪽을 기준으로 셉니다. 3쪽 미만 문서는 건너뜁니다.
 3. **쪽 번호 줄 지우기**: 숫자만 있는 줄을 지웁니다.
 4. **줄바꿈 이어 붙이기**: PDF는 문장 중간에서 줄을 바꾸고, 문단 사이에 빈 줄이 없습니다. 줄을 공백으로 이어 붙이되, `.` `:` `?` `!` 로 끝나는 줄 뒤와 글머리표(•, -, 1. 등) 줄 앞에서 문단을 나눕니다. `-` 로 끝나는 줄은 공백 없이 붙입니다 (`high-` + `end` → `high-end`). 결과는 문단 하나가 한 줄입니다.
@@ -107,10 +109,10 @@ PDF에서 뽑은 글자를 읽기 좋은 본문으로 만드는 규칙입니다.
 | 1. `extract` | 프로그램 | 파일명 해석, PDF 지문(sha256), 텍스트 추출(pymupdf, 없으면 pdfplumber, 그다음 pypdf), 4절 정리, 참고 신호 계산(스마트폰 단어 수, URL 수) | `staging/<id>/text.txt`, `meta.json` |
 | 2. triage (분류) | 에이전트 | `text.txt` 전체를 읽고 종류·관련도·이유를 기록 | `staging/<id>/triage.json` |
 | | 프로그램 | 결정 규칙 적용, 사용자 검토용 표 작성 (`triage-report`) | `staging/triage.md` |
-| 3. annotate (주석) | 에이전트 | 적재 대상만: 제목·요약·키워드·주제·핵심 숫자 등을 기록 | `staging/<id>/annotate.json` |
-| 4. `load` | 프로그램 | 검증 → (MinIO 업로드) → 1행 INSERT. 레포트마다 한 트랜잭션 | DB 행, MinIO 객체 |
+| 3. annotate (주석) | 에이전트 | 적재 대상만: 주장·요약·키워드·핵심 숫자 등을 기록 (티커·주제는 6절 자동 집계) | `staging/<id>/annotate.json` |
+| 4. `load` | 프로그램 | 검증 → 레포트 1행 + 문단 N행 INSERT → (MinIO 업로드). 레포트마다 한 트랜잭션 | DB 행, MinIO 객체 |
 
-`status` 명령은 레포트마다 한 줄로 단계 상태(분류·결정·주석·적재)와 파일 오류를 보여줍니다. 이 로더는 소유자만 쓰므로 PDF 라이브러리는 개발용 의존성(`requirements-dev.txt`)에만 넣고, 동료 설치(`install.ps1`)는 바뀌지 않습니다.
+`status` 명령은 레포트마다 한 줄로 단계 상태(분류·결정·주석·적재), 자동 티커·주제·문단 수, 파일 오류를 보여줍니다. `paragraphs <id>` 는 한 레포트의 문단별 태그를 보여줍니다 (6절). 이 로더는 소유자만 쓰므로 PDF 라이브러리는 개발용 의존성(`requirements-dev.txt`)에만 넣고, 동료 설치(`install.ps1`)는 바뀌지 않습니다.
 
 ### 작업 폴더 (`staging/`)
 
@@ -160,15 +162,15 @@ PDF에서 뽑은 글자를 읽기 좋은 본문으로 만드는 규칙입니다.
 | `ticker` | 파일명에 없고 단일 기업 레포트일 때 | `ticker` |
 | `analyst` | 이름이 보이면 대표 애널리스트 | `analyst` |
 | `thesis` | 필수. 레포트의 주장 한 문장 (한국어, 10~300자, 한 줄) | `thesis` |
-| `scope` | 필수. 레포트가 무엇에 대한 것인지 1~6개: `market`(시장 전반), `vendor:<업체명>`(특정 업체가 주제, 업체명에 쉼표 없음), `band:<high\|mid\|low>`(특정 가격대). 여러 개 가능 | `scope` = 쉼표로 이음 (예: `market, vendor:Apple`) |
 | `summary_ko` | 한국어 요약 3~6줄 (한 줄에 한 문장). 1번째 줄은 `thesis` 를 다시 쓰거나 핵심 주장, 2번째 줄부터는 근거이며 각 줄에 `[p.N]` 포함 | `summary` = 한국어 줄들 + 줄바꿈 + 영어 1줄 |
 | `summary_en` | 영어 요약 1줄 | (위와 같이 `summary` 에) |
 | `keywords_ko`, `keywords_en` | 각 10개 이하, 키워드 안에 쉼표 없음 | `keywords` = 한국어 + 영어를 쉼표로 이음 |
-| `topics` | 고정 목록에서 1개 이상: 스마트폰, AP, 메모리, 카메라, 디스플레이, 모뎀, 파운드리, OEM, 공급망, 거시, 스마트워치 | `topics` (쉼표로 이음) |
 | `key_numbers` | 핵심 숫자를 단위·기간과 함께 그대로, 출처 `[p.N]` 포함. 없으면 빈 문자열 | `key_numbers` |
 | (분류의 `kind`) | | `report_type` |
 
-요약은 검색용이 아니라 훑어보기용입니다 (본문은 전문 저장되어 ILIKE/pg_trgm 로 문단 검색이 가능합니다). `thesis` 로 "이번 주 새 레포트들의 주장 목록" 을 한 쿼리로 뽑습니다. `scope` 는 TAM 점검용입니다: Apple 이 언급된 레포트가 아니라 Apple 이 주제인 레포트를 찾습니다.
+`scope`(레포트 티커)와 `topics`(주제)는 주석 항목이 아닙니다. 프로그램이 사전으로 문단을 태깅해 집계합니다 (6절). `annotate.json` 에 넣으면 "모르는 키" 오류입니다.
+
+요약은 검색용이 아니라 훑어보기용입니다 (본문은 전문 저장되어 ILIKE/pg_trgm 로 문단 검색이 가능합니다). `thesis` 로 "이번 주 새 레포트들의 주장 목록" 을 한 쿼리로 뽑습니다. `scope` 는 TAM 점검용입니다: 문단의 20% 이상 또는 제목에 나온 티커만 들어가므로, 한두 번 언급만 된 업체는 빠집니다.
 
 `firm_analysis` 기사는 추가 규칙이 있다: `keywords_en` 에 기사에 나온 모든 업체명과 모든 국가·지역명을 넣고(예: `Apple, Huawei, China, India`), `keywords_ko` 에 그 한국어 표기를 넣는다. `key_numbers` 에는 출하량·성장률 숫자를 모두 원문 그대로 `[p.1]` 과 함께 옮긴다. 기사는 1쪽짜리 텍스트라 면책 절단·머리말 제거를 하지 않는다.
 
@@ -176,24 +178,82 @@ PDF에서 뽑은 글자를 읽기 좋은 본문으로 만드는 규칙입니다.
 
 ### 적재 (`load`)
 
-- `load --local`: 내 PC의 내장 PostgreSQL(`pgserver`, 데이터는 `staging/localpg/`)에 `sales_team` 스키마와 3절 테이블을 없으면 만들고 적재합니다. MinIO는 쓰지 않습니다.
-- `load --dsn-env MI_DB_REPORTS_WRITE`: 같은 작업 폴더를 회사 DB에 적재하고 원본 PDF를 MinIO(`MI_MINIO_WRITE`)에 올립니다. 회사 DB에는 아무것도 만들지 않으며, 테이블이 없으면 멈춥니다. `--no-minio` 를 주면 업로드만 건너뜁니다.
+- `load --local`: 내 PC의 내장 PostgreSQL(`pgserver`, 데이터는 `staging/localpg/`)에 `sales_team` 스키마와 3절·6절 테이블을 없으면 만들고 적재합니다. MinIO는 쓰지 않습니다.
+- `load --dsn-env MI_DB_REPORTS_WRITE`: 같은 작업 폴더를 회사 DB에 적재하고 원본 PDF를 MinIO(`MI_MINIO_WRITE`)에 올립니다. 회사 DB에는 아무것도 만들지 않으며, 두 테이블 중 하나라도 없으면 멈춥니다. `--no-minio` 를 주면 업로드만 건너뜁니다.
 - 같은 지문(`file_sha256`)이 이미 있으면 건너뜁니다 (MinIO 업로드도 하지 않음). 몇 번을 다시 돌려도 결과가 같습니다.
 - 레포트 하나 = 한 트랜잭션입니다. 한 건이 실패해도 나머지는 계속하고, 마지막에 건수를 보여줍니다.
 - `minio_key` 는 `--no-minio` 여도 항상 계산해서 저장합니다.
 - 쓰기 접속 정보는 환경변수 `MI_DB_REPORTS_WRITE`(DB 접속 문자열)와 `MI_MINIO_WRITE`(MinIO, `MI_MINIO` 와 같은 형식)에만 두고, 소유자 PC의 현재 터미널에서만 설정합니다. 화면·파일·오류 메시지에 절대 출력하지 않습니다.
 
-## 6. 찾기(검색) 흐름 (동료 에이전트 입장)
+## 6. 문단 테이블과 사전 태깅 (2026-10-14)
+
+**왜**: 레포트가 주 약 150건(티커 134개, 증권사 5곳) 들어옵니다. 이 양에서는 에이전트가 쓴 분류(업체·주제)를 사람이 검증할 수 없습니다. 그래서 `thesis`·요약을 뺀 나머지는 규칙으로 정합니다. 본문을 규칙대로 문단으로 나누고, 사용자가 고칠 수 있는 사전으로 문단마다 티커·주제를 붙이고, 레포트의 티커·주제는 문단 태그를 집계해 정합니다. 사용자는 태그가 붙은 문단을 열어 검증합니다.
+
+| 단계 | 누가 | 무엇 |
+|---|---|---|
+| 1. 추출 | 프로그램 | PDF → 쪽별 글자, 4절 정리 |
+| 2. 꼬리 자르기 | 프로그램 | 문단 분할·태깅보다 먼저. 2쪽부터 `cutoff.csv` 구절로 시작하는 60자 이하 줄(제목)부터 끝까지 버림 |
+| 3. 문단 분할 | 프로그램 | `text.txt` 한 줄 = 한 문단. 40자 미만이고 `.` `?` `!` 로 끝나지 않는 줄(표 조각·캡션)은 앞 문단에 붙임. 쪽의 첫 줄은 붙이지 않음 |
+| 4. 사전 태깅 | 프로그램 | 문단에 `tickers.csv` 별칭이나 `topics.csv` 키워드가 나오면 그 티커·주제를 붙임 |
+| 5. 집계 | 프로그램 | 레포트 티커·주제 = 문단의 20% 이상에 나온 것 + 제목에 나온 것 |
+| 6. thesis 작성 | 에이전트 | 주장 한 문장, 요약, 키워드, 핵심 숫자 (`annotate.json`) |
+| 7. 검토 | 사용자 | `paragraphs <id>` 로 문단별 태그와 집계 확인. 틀리면 사전을 고침 |
+| 8. 적재 | 프로그램 | 레포트 1행 + 문단 N행을 한 트랜잭션으로 |
+
+**테이블** (`nasdaq_report_doc` 의 자식. 레포트 행이 지워지면 문단도 지워짐):
+
+```sql
+CREATE TABLE IF NOT EXISTS sales_team.nasdaq_report_para (
+  id SERIAL PRIMARY KEY,
+  doc_id INTEGER NOT NULL REFERENCES sales_team.nasdaq_report_doc(id) ON DELETE CASCADE,
+  page INTEGER NOT NULL,
+  para_no INTEGER NOT NULL,
+  tickers VARCHAR(300),
+  topics VARCHAR(100),
+  text TEXT NOT NULL,
+  UNIQUE (doc_id, para_no)
+);
+```
+
+| 칸 | 의미 |
+|---|---|
+| `doc_id` | `nasdaq_report_doc.id` (외래키) |
+| `page` | 쪽 번호 (`[p.N]` 의 N) |
+| `para_no` | 레포트 안 문단 번호. 1부터 쪽을 넘어 이어짐 |
+| `tickers` | 문단에 나온 티커를 쉼표로 이음 (예: `005930-KRX, AAPL-USQ`). 없으면 NULL |
+| `topics` | 문단에 나온 주제를 쉼표로 이음 (예: `smartphone, ai`). 없으면 NULL |
+| `text` | 문단 원문 (영어) |
+
+칸 길이(300자·100자)를 넘는 태그 목록은 들어가는 만큼만 저장합니다 (업체 30곳 이상이 나오는 비교표 문단).
+
+**20% 규칙**: 레포트의 티커·주제는 그 태그가 붙은 문단 수가 전체 문단의 20% 이상(올림, 최소 1개)이거나 제목에 나온 것입니다. 문단 수가 많은 순으로 적습니다. 기준값은 `tools/load_reports.py` 의 `DOC_SHARE` 입니다.
+
+**사전 3개** (`tools/dict/`, UTF-8 CSV, 첫 줄은 칸 이름, `#` 로 시작하는 줄은 주석, 목록은 `|` 로 구분):
+
+| 파일 | 칸 | 내용 |
+|---|---|---|
+| `tickers.csv` | `ticker,name,aliases` | 티커 134개와 별칭 1~4개 |
+| `topics.csv` | `topic,keywords` | 주제 7개(`ai`, `smartphone`, `auto`, `smartwatch`, `smartglass`, `tablet`, `humanoid`)와 키워드 |
+| `cutoff.csv` | `phrase` | 면책·공시 꼬리가 시작하는 제목 |
+
+- 찾는 규칙: 영문은 단어 단위(`Micron` 은 `Microns` 에 안 걸림), 한글은 글자 그대로. 4자 이상은 대소문자 무시, 3자 이하(`SEC`, `AI`)는 대소문자까지 같아야 함. 겹치면 긴 쪽이 이김(`Samsung SDI` 는 삼성SDI만).
+- 누가 고치나: 에이전트가 초안을 만들고(2026-10-14) → 사용자가 고치고 → 그 뒤로는 사용자만 고칩니다. 사전은 git 에 커밋합니다 (레포트 내용은 들어 있지 않음).
+
+**칸 의미 변경**: `nasdaq_report_doc.scope` 는 이제 레포트 티커(예: `AAPL-USQ, 005930-KRX`), `topics` 는 7개 주제 중 해당하는 것(예: `smartphone, ai`)입니다. 둘 다 프로그램이 위 규칙으로 채우며, 없으면 NULL 입니다. `annotate.json` 에는 더 이상 쓰지 않습니다.
+
+**재추출 불필요**: 문단과 태그는 파일에 저장하지 않고 `status`·`triage-report`·`paragraphs`·`load` 를 실행할 때마다 `text.txt` 와 현재 사전으로 다시 계산합니다. 사전을 고치면 다음 실행부터 반영됩니다. 예외: `cutoff.csv` 는 추출 때 쓰이므로 해당 레포트를 `extract --force` 로 다시 추출해야 합니다. 이미 적재된 레포트는 다시 적재하지 않으므로(같은 지문) DB 값은 바뀌지 않습니다.
+
+## 7. 찾기(검색) 흐름 (동료 에이전트 입장)
 
 동료는 다시 설치할 필요가 없습니다. 같은 DB의 읽기전용 계정(`MI_DB_SMARTPHONE`)을 쓰는 새 소스 설명 파일 `sources/reports.md`(kind postgres, 테이블 `sales_team.nasdaq_report_doc`)만 추가되며, 기존 `sql` 명령으로 조회합니다. SKILL.md에는 "증권사 레포트 찾기" 단계가 짧게 추가됩니다.
 
-**1단계: 메타로 좁히기.** 한국어 요약·키워드·주제가 있으므로 질문의 한국어 단어로 바로 찾고, 증권사·기간으로 거릅니다. 이 단계에서는 `body` 를 가져오지 않습니다.
+**1단계: 메타로 좁히기.** 한국어 요약·키워드가 있으므로 질문의 한국어 단어로 바로 찾고, 주제(7개, 영문)·증권사·기간으로 거릅니다. 이 단계에서는 `body` 를 가져오지 않습니다.
 
 ```sql
 SELECT id, firm, published_on, title, topics, summary
 FROM sales_team.nasdaq_report_doc
 WHERE published_on >= DATE '2026-07-01'
-  AND topics ILIKE '%스마트폰%'
+  AND topics LIKE '%smartphone%'
   AND (keywords ILIKE '%폴더블%' OR keywords ILIKE '%foldable%' OR summary ILIKE '%폴더블%')
 ORDER BY published_on DESC;
 ```
@@ -223,7 +283,7 @@ SELECT firm, published_on, title, body FROM sales_team.nasdaq_report_doc WHERE i
 | pg_trgm GIN 인덱스 | 확장은 서버에 있음, 인덱스 생성 요청 필요 | 건수가 늘어 ILIKE가 느려지면 빠르게 함 |
 | pgvector | 확장은 서버에 있음, 임베딩(문장을 숫자로 바꾼 값) 생성 필요 | 단어가 달라도 뜻이 비슷하면 찾는 의미 검색 |
 
-## 7. 기존 `smartphone_market_data` 에도 적용할 후보
+## 8. 기존 `smartphone_market_data` 에도 적용할 후보
 
 사용자 결정: 필요하면 기본키·외래키·인덱스를 적극 사용해도 됩니다. 아래는 후보이며, 테이블 소유권과 db_check 9절 프로필을 확인한 뒤 확정합니다.
 
@@ -233,18 +293,19 @@ SELECT firm, published_on, title, body FROM sales_team.nasdaq_report_doc WHERE i
 
 주의: 이미 들어있는 데이터에 중복이 있으면 UNIQUE 생성이 실패합니다. 먼저 중복을 조회하고, 정리하고, 그다음 제약을 추가하는 순서로 진행합니다.
 
-## 8. 남은 확인 사항
+## 9. 남은 확인 사항
 
 - [x] 저장 구조 → 단일 테이블 `sales_team.nasdaq_report_doc` (기존 스키마, 새 스키마 요청 안 함)
 - [x] 본문 검색 → ILIKE로 시작, 인덱스는 나중 (pg_trgm·pgvector는 서버에 있음)
 - [x] 쓰기 계정 발급 여부 → 있음 (`MI_DB_REPORTS_WRITE`)
-- [ ] DBaaS 팀 테이블 생성 결과 (8b 요청문)
+- [ ] DBaaS 팀 테이블 생성 결과 (9b 요청문)
+- [ ] 문단 테이블 `nasdaq_report_para` (6절) 생성 결과와 권한: 쓰기 계정은 SELECT·INSERT와 시퀀스 `sales_team.nasdaq_report_para_id_seq` USAGE, 읽기 계정은 SELECT
 - [ ] 권한 (별도 요청): 쓰기 계정은 이 테이블 SELECT·INSERT와 자동 번호 시퀀스(`sales_team.nasdaq_report_doc_id_seq`) USAGE가 필요합니다. 읽기 계정(`MI_DB_SMARTPHONE`)은 이 테이블 SELECT가 필요합니다.
 - [ ] MinIO: 레포트 원본을 올릴 버킷과 쓰기 키(`MI_MINIO_WRITE`), 동료의 읽기 키(`MI_MINIO`)로 그 버킷을 받을 수 있는지
 - [ ] `smartphone_market_data` 소유권 (제약을 추가할 수 있는지)
-- [ ] 7절 후보 중 무엇을 적용할지
+- [ ] 8절 후보 중 무엇을 적용할지
 
-## 8b. DBaaS 팀 요청문
+## 9b. DBaaS 팀 요청문
 
 ```
 [요청] sales_team 스키마에 테이블 1개 생성
@@ -274,14 +335,16 @@ CREATE TABLE sales_team.nasdaq_report_doc (
 용도: 증권사 레포트 요약·본문 저장 (수십 건, 수 MB 수준). 기존 sales_team 테이블은 건드리지 않음.
 ```
 
-권한(쓰기 계정과 읽기 계정이 이 테이블에 무엇을 할 수 있는지)은 이 요청과 별도로 요청합니다. 필요한 내용은 8절에 있습니다.
+권한(쓰기 계정과 읽기 계정이 이 테이블에 무엇을 할 수 있는지)은 이 요청과 별도로 요청합니다. 필요한 내용은 9절에 있습니다.
 
-## 9. 다음 단계 순서
+추가 요청 (2026-10-14, 대기): 문단 테이블 `sales_team.nasdaq_report_para`. DDL 은 6절, 보낼 문구는 [reports-loader-run.md](../../handoff/reports-loader-run.md#dbaas-request-pending).
+
+## 10. 다음 단계 순서
 
 1. 스마트폰 DB 정리 (사내 작업 진행 중)
 2. db_check 판정 (완료)
 3. 레포트 추출 점검 (완료: 파일명 모양, 공시 꼬리, 머리말·꼬리말, 줄바꿈, 표 확인)
-4. DBaaS 팀 테이블 생성 요청 (8b) + 권한 별도 요청: 대기 중
+4. DBaaS 팀 테이블 생성 요청 (9b, 문단 테이블 추가 요청 포함) + 권한 별도 요청: 대기 중
 5. `tools/load_reports.py` 구현 → 사내 에이전트가 extract·triage·annotate 후 `load --local` 로 로컬에 쌓기
 6. 테이블과 권한이 생기면 `load --dsn-env MI_DB_REPORTS_WRITE` 로 회사 DB와 MinIO에 적재하고, `sources/reports.md` + SKILL.md 검색 단계 배포
 7. 숫자 구조화 (별도 설계)
