@@ -61,9 +61,9 @@ python tools\load_reports.py status
 
 ## STEP 4. 분류 (triage) — 멈춤 있음
 목적: 어떤 레포트를 지식으로 삼을지 사람이 정한다. 쓸모없는 것(링크 모음 등)을 걸러 검색 품질을 지킨다.
-- `docs/handoff/reports-loader-run.md` 의 triage 규칙대로 모든 레포트에 `triage.json` 을 쓴다 (kind, relevance, 이유 한 줄).
+- `docs/handoff/reports-loader-run.md` 의 triage 규칙대로 모든 레포트에 `triage.json` 을 쓴다 (kind + 이유 한 줄, 관련도는 프로그램이 주제 사전으로 자동 산출).
 - `python tools\load_reports.py triage-report` 로 `staging/triage.md` 를 만든다.
-- 보고: 적재 대상 수 / 제외 수, kind 별 건수, relevance 별 건수, 자동 티커·주제가 비어 있는 레포트 수와 그 제목 (`status` 줄의 `tickers=-` 또는 `topics=-`). 제외 목록은 "제목 + 이유" 만 (본문 인용 금지).
+- 보고: 적재 대상 수 / 제외 수, kind 별 건수, 관련도(`status` 줄의 `rel=`) 별 건수, 관련도 low 레포트 수와 제목, 자동 티커·주제가 비어 있는 레포트 수와 그 제목 (`status` 줄의 `tickers=-` 또는 `topics=-`). 제외 목록은 "제목 + 이유" 만 (본문 인용 금지).
 - 멈춤: "triage.md 를 열어 확인 후 A. 그대로 진행 / B. 바꿀 항목 알려줌(제목 + load true/false) / C. 전부 다시 분류 / D. 기타" 로 묻는다.
 - 멈춤 (자동 티커·주제가 빈 레포트가 있을 때): 레포트별로 "A. 사전에 추가 후 재실행(권장): 에이전트가 넣을 별칭·키워드 후보를 보여 주고 사용자가 `tools/dict/tickers.csv`·`topics.csv` 에 넣은 뒤 `status` 다시 실행 (재추출 불필요) / B. 그대로 진행 / C. 제외 / D. 기타" 로 묻는다.
 

@@ -314,6 +314,14 @@ def derive(paras: list[dict], title: str | None, dicts: Dicts) -> dict:
     return out
 
 
+RELEVANCE = ("high", "medium", "low")
+
+
+def relevance(derived: dict) -> str:
+    """high: an application topic is document-level; medium: only some paragraph has a topic tag; else low."""
+    return RELEVANCE[0] if derived["doc_topics"] else RELEVANCE[1] if derived["topics"] else RELEVANCE[2]
+
+
 # ---------- extract ----------
 
 def read_json(path: Path):
@@ -437,8 +445,7 @@ def cmd_extract(staging: Path, paths: list[Path], force: bool) -> int:
 
 KINDS = ("link_digest", "weekly_note", "company_update", "industry_deep_dive", "mgmt_meeting", "firm_analysis",
          "other")
-RELEVANCE = ("high", "medium", "low")
-TRIAGE_KEYS = {"kind", "relevance", "reason", "load"}
+TRIAGE_KEYS = {"kind", "reason", "load"}
 ANNOTATE_KEYS = {"title", "ticker", "analyst", "thesis", "summary_ko", "summary_en", "keywords_ko", "keywords_en",
                  "key_numbers"}  # scope (tickers) and topics are derived from tools/dict, not written by the agent
 
@@ -450,11 +457,10 @@ def _line(v) -> bool:
 def validate_triage(t) -> list[str]:
     if not isinstance(t, dict):
         return ["JSON 객체가 아닙니다"]
-    errs = [f"모르는 키: {k}" for k in sorted(set(t) - TRIAGE_KEYS)]
+    errs = [f"모르는 키: {k}" + (" (프로그램이 주제 사전으로 산출)" if k == "relevance" else "")
+            for k in sorted(set(t) - TRIAGE_KEYS)]
     if t.get("kind") not in KINDS:
         errs.append(f"kind 는 {', '.join(KINDS)} 중 하나")
-    if t.get("relevance") not in RELEVANCE:
-        errs.append(f"relevance 는 {', '.join(RELEVANCE)} 중 하나")
     if not _line(t.get("reason")):
         errs.append("reason 은 비어 있지 않은 한 줄")
     if "load" in t and not isinstance(t["load"], bool):
@@ -462,11 +468,11 @@ def validate_triage(t) -> list[str]:
     return errs
 
 
-def decide(t: dict) -> bool:
-    """Load rule: relevance high/medium and not a link digest. A user-written `load` overrides it."""
+def decide(t: dict, rel: str) -> bool:
+    """Load rule: derived relevance high/medium and not a link digest. A user-written `load` overrides it."""
     if isinstance(t.get("load"), bool):
         return t["load"]
-    return t["relevance"] in ("high", "medium") and t["kind"] != "link_digest"
+    return rel in ("high", "medium") and t["kind"] != "link_digest"
 
 
 def _words(v) -> bool:
@@ -509,6 +515,11 @@ def report_state(d: Path, dicts: Dicts) -> dict:
     recomputed from text.txt with the current dictionaries, so a dictionary edit applies without re-extracting."""
     s = {"id": d.name, "dir": d, "meta": read_json(d / "meta.json"), "triage": None, "t_err": [],
          "load": None, "annotate": None, "a_err": []}
+    text = d / "text.txt"
+    s["paras"] = tag_paragraphs(split_paragraphs(text.read_text(encoding="utf-8") if text.exists() else ""), dicts)
+    s["title"] = s["meta"]["title"]
+    s["derived"] = derive(s["paras"], s["title"], dicts)
+    s["relevance"] = relevance(s["derived"])  # from the file-name title; annotate may later replace the title
     try:
         s["triage"] = read_json(d / "triage.json")
     except ValueError as e:
@@ -516,7 +527,7 @@ def report_state(d: Path, dicts: Dicts) -> dict:
     if s["triage"] is not None:
         s["t_err"] = validate_triage(s["triage"])
         if not s["t_err"]:
-            s["load"] = decide(s["triage"])
+            s["load"] = decide(s["triage"], s["relevance"])
     if s["load"]:
         try:
             s["annotate"] = read_json(d / "annotate.json")
@@ -524,8 +535,6 @@ def report_state(d: Path, dicts: Dicts) -> dict:
             s["a_err"] = [f"JSON 오류: {e}"]
         if s["annotate"] is not None:
             s["a_err"] = validate_annotate(s["annotate"], s["meta"])
-    text = d / "text.txt"
-    s["paras"] = tag_paragraphs(split_paragraphs(text.read_text(encoding="utf-8") if text.exists() else ""), dicts)
     ann = s["annotate"] if isinstance(s["annotate"], dict) else {}
     s["title"] = (ann.get("title") if isinstance(ann.get("title"), str) else None) or s["meta"]["title"]  # as build_row
     s["derived"] = derive(s["paras"], s["title"], dicts)
@@ -554,7 +563,7 @@ def cmd_status(staging: Path) -> int:
         loaded = ",".join(m.get("loaded", {})) or "-"
         dv = s["derived"]
         print(f"{s['id']} {m['published_on']} {m['firm']:<12} triage={_stage(s['triage'], s['t_err'])} "
-              f"decision={decision} annotate={annotate} loaded={loaded} tickers={','.join(dv['doc_tickers']) or '-'} "
+              f"rel={s['relevance']} decision={decision} annotate={annotate} loaded={loaded} tickers={','.join(dv['doc_tickers']) or '-'} "
               f"topics={','.join(dv['doc_topics']) or '-'} paras={dv['paragraphs']}  {m['title'] or '(제목 없음)'}")
         for e in s["t_err"]:
             print(f"    ! triage.json: {e}")
@@ -617,17 +626,17 @@ def cmd_triage_report(staging: Path) -> int:
         f"생성: {datetime.now():%Y-%m-%d %H:%M} / 전체 {len(states)}건: 적재 {n['load']}, 제외 {n['skip']}, "
         f"미분류·오류 {n['todo']}",
         "",
-        "규칙: relevance 가 high 또는 medium 이고 kind 가 link_digest 가 아니면 적재합니다.",
+        "규칙: 관련도(주제 사전으로 자동 산출)가 high 또는 medium 이고 kind 가 link_digest 가 아니면 적재합니다.",
         "결정을 바꾸려면 `staging/<id>/triage.json` 에 `\"load\": true` 또는 `\"load\": false` 를 넣고 "
         "`triage-report` 를 다시 실행하세요 (결정 칸에 `(수동)` 표시).",
         "제외된 레포트는 DB와 MinIO 어디에도 올라가지 않고 이 파일에만 기록됩니다.",
     ]
-    cols = ["id", "발행일", "증권사", "티커", "제목", "티커(자동)", "주제(자동)", "종류", "관련도", "결정", "이유",
+    cols = ["id", "발행일", "증권사", "티커", "제목", "티커(자동)", "주제(자동)", "종류", "관련도(자동)", "결정", "이유",
             "폰 단어/URL"]
     for key, label in (("load", "적재"), ("skip", "제외")):
         rows = [(s["id"], s["meta"]["published_on"], s["meta"]["firm"], s["meta"]["ticker"], s["meta"]["title"],
                  ", ".join(s["derived"]["doc_tickers"]), ", ".join(s["derived"]["doc_topics"]),
-                 s["triage"]["kind"], s["triage"]["relevance"], label + (" (수동)" if "load" in s["triage"] else ""),
+                 s["triage"]["kind"], s["relevance"], label + (" (수동)" if "load" in s["triage"] else ""),
                  s["triage"]["reason"], f"{s['meta']['smartphone_hits']}/{s['meta']['url_count']}")
                 for s in groups[key]]
         lines += ["", f"## {label} ({len(rows)})", "", *md_table(cols, rows)]

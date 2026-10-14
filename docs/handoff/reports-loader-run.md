@@ -71,7 +71,7 @@ For each id, read the WHOLE `staging/<id>/text.txt` (and `meta.json` for firm, d
 `staging/<id>/triage.json`:
 
 ```json
-{"kind": "company_update", "relevance": "medium", "reason": "메모리 업체 레포트지만 스마트폰 DRAM 탑재량 전망 단락이 있음"}
+{"kind": "company_update", "reason": "메모리 업체 레포트지만 스마트폰 DRAM 탑재량 전망 단락이 있음"}
 ```
 
 - `kind`, exactly one of:
@@ -82,16 +82,17 @@ For each id, read the WHOLE `staging/<id>/text.txt` (and `meta.json` for firm, d
   - `mgmt_meeting`: write-up of a management meeting, investor day, conference meeting or site visit
   - `firm_analysis`: short analysis article from a research firm (TechInsights), saved from pasted text as a `.md` file
   - `other`: anything else
-- `relevance`, exactly one of:
-  - `high`: the smartphone / handset / phone-component **or smartwatch** market, shipments or OEMs are the subject
-  - `medium`: the subject is something else, but the report has a section on smartphone / handset / phone-component **or smartwatch** demand
-    (example: a memory report with a mobile-demand section)
-  - `low`: unrelated
+- Do not write `relevance`: the program derives it from the topic dictionary tags (`tools/dict/topics.csv`), and a `relevance` key is an error.
+  - `high`: an application topic is document-level (>= 20% of paragraphs or in the title)
+  - `medium`: no document-level topic, but at least one paragraph has a topic tag
+  - `low`: no paragraph has a topic tag
+- The agent writes only `kind` and `reason`.
 - `reason`: one line, Korean, saying why.
 - Do not write a `load` key. Only the owner adds it.
 - The `phone` count is a hint only: 51 of the 54 reports mention smartphone words at least once.
 
-The program decides: load ⇔ `relevance` is `high` or `medium` AND `kind` is not `link_digest`.
+The program decides: load ⇔ derived relevance is `high` or `medium` AND `kind` is not `link_digest`.
+If a report is `low` but should load, add keywords to `tools/dict/topics.csv` (preferred) or set `"load": true`.
 
 ```powershell
 python tools/load_reports.py status          # every line triage=ok; fix every "! triage.json:" line

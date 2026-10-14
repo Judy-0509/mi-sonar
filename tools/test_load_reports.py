@@ -429,7 +429,7 @@ def test_extract_mixed_folder_and_minio_extension(pdf_dir, tmp_path, capsys):
 
 # ---------- triage / annotate / status ----------
 
-GOOD_TRIAGE = {"kind": "company_update", "relevance": "high", "reason": "아이폰 부품 수요 전망이 주제"}
+GOOD_TRIAGE = {"kind": "company_update", "reason": "아이폰 부품 수요 전망이 주제"}
 GOOD_ANNOTATE = {
     "title": "Micron Technology: Mgmt Meeting, CY27 and CY28 Both Significantly Tight",
     "analyst": "Jane Doe",
@@ -454,8 +454,9 @@ META = {"id": "a1b2c3d4e5f6", "file_sha256": "a1b2c3d4e5f6" + "0" * 52, "source_
 
 def test_validate_triage_ok_and_errors():
     assert lr.validate_triage(GOOD_TRIAGE) == []
-    errs = lr.validate_triage({"kind": "news", "relevance": "hi", "reason": "a\nb", "load": "yes", "x": 1})
+    errs = lr.validate_triage({"kind": "news", "relevance": "high", "reason": "a\nb", "load": "yes", "x": 1})
     assert len(errs) == 5
+    assert any("모르는 키: relevance (프로그램이 주제 사전으로 산출)" in e for e in errs)
     assert lr.validate_triage([1]) == ["JSON 객체가 아닙니다"]
 
 
@@ -470,10 +471,22 @@ def test_validate_triage_ok_and_errors():
     ("firm_analysis", "low", None, False),
 ])
 def test_decide(kind, relevance, load, expect):
-    t = {"kind": kind, "relevance": relevance, "reason": "r"}
+    t = {"kind": kind, "reason": "r"}
     if load is not None:
         t["load"] = load
-    assert lr.decide(t) is expect
+    assert lr.decide(t, relevance) is expect
+
+
+def test_low_load_override_stays_loaded(tmp_path):
+    st = tmp_path / "staging"
+    write_report(st, "aaaaaaaaaaaa", {**GOOD_TRIAGE, "load": True})
+    assert lr.report_state(st / "aaaaaaaaaaaa", lr.load_dicts())["load"] is True
+
+
+def test_relevance_from_derived():
+    assert lr.relevance({"doc_topics": ["smartphone"], "topics": {"smartphone": 3}}) == "high"
+    assert lr.relevance({"doc_topics": [], "topics": {"ai": 1}}) == "medium"
+    assert lr.relevance({"doc_topics": [], "topics": {}}) == "low"
 
 
 def test_validate_annotate_ok_and_title_rule():
@@ -525,8 +538,9 @@ def write_report(st: Path, rid: str, triage=None, annotate=None, text=None, **me
 @pytest.fixture
 def staging(tmp_path):
     st = tmp_path / "staging"
-    write_report(st, "aaaaaaaaaaaa", GOOD_TRIAGE, GOOD_ANNOTATE)  # load, ready
-    write_report(st, "bbbbbbbbbbbb", {**GOOD_TRIAGE, "relevance": "low", "reason": "서버 전용"})  # skip
+    write_report(st, "aaaaaaaaaaaa", GOOD_TRIAGE, GOOD_ANNOTATE,
+                text="[p.1]\nsmartphone demand.\n")  # load, ready
+    write_report(st, "bbbbbbbbbbbb", {**GOOD_TRIAGE, "reason": "서버 전용"})  # skip
     write_report(st, "cccccccccccc", {**GOOD_TRIAGE, "kind": "link_digest", "load": True})  # load (manual), no annotate
     write_report(st, "dddddddddddd", "{not json")  # broken triage
     write_report(st, "eeeeeeeeeeee", published_on="2026-01-01")  # untriaged
@@ -538,8 +552,8 @@ def test_status_lines(staging, capsys):
     lines = capsys.readouterr().out.splitlines()
     assert lines[0].startswith("eeeeeeeeeeee 2026-01-01")  # sorted by date
     by_id = {ln[:12]: ln for ln in lines}
-    assert "triage=ok decision=load annotate=ok loaded=- tickers=MU-USQ topics=- paras=1  " in by_id["aaaaaaaaaaaa"]
-    assert "decision=skip annotate=n/a" in by_id["bbbbbbbbbbbb"]
+    assert "triage=ok rel=high decision=load annotate=ok loaded=- tickers=MU-USQ topics=smartphone paras=1  " in by_id["aaaaaaaaaaaa"]
+    assert "rel=low decision=skip annotate=n/a" in by_id["bbbbbbbbbbbb"]
     assert "decision=load* annotate=-" in by_id["cccccccccccc"]
     assert "triage=ERR" in by_id["dddddddddddd"]
     assert any(ln.startswith("    ! triage.json: JSON 오류") for ln in lines)
@@ -551,8 +565,9 @@ def test_triage_report(staging, capsys):
     md = (staging / "triage.md").read_text(encoding="utf-8")
     assert "## 적재 (2)" in md and "## 제외 (1)" in md and "## 미분류·오류 (2)" in md
     assert "서버 전용" in md and "적재 (수동)" in md and "triage.json 없음" in md
-    assert "| 제목 | 티커(자동) | 주제(자동) | 종류 |" in md
-    assert "| Micron Technology Mgmt Mtg | MU-USQ |  | company_update |" in md
+    assert "| 제목 | 티커(자동) | 주제(자동) | 종류 | 관련도(자동) |" in md
+    assert "| Micron Technology Mgmt Mtg | MU-USQ | smartphone | company_update | high |" in md
+    assert "규칙: 관련도(주제 사전으로 자동 산출)가 high 또는 medium 이고 kind 가 link_digest 가 아니면 적재합니다." in md
     assert "적재 2" in capsys.readouterr().out
 
 
@@ -663,8 +678,8 @@ def test_load_dsn_env_uploads_once_and_skips_existing(srv, staging, monkeypatch,
         rows = c.execute(f"SELECT firm, title, keywords, body, body_loaded FROM {lr.TABLE}").fetchall()
         paras = c.execute(f"SELECT page, para_no, text FROM {lr.PARA_TABLE}").fetchall()
     assert rows == [("JPMorgan", GOOD_ANNOTATE["title"], "HBM, 모바일 DRAM, HBM, mobile DRAM, LPDDR5X",
-                     "[p.1]\nBody of aaaaaaaaaaaa.\n", True)]
-    assert paras == [(1, 1, "Body of aaaaaaaaaaaa.")]
+                     "[p.1]\nsmartphone demand.\n", True)]
+    assert paras == [(1, 1, "smartphone demand.")]
 
 
 def test_load_dsn_env_refuses_missing_table(srv, staging, monkeypatch, capsys):
@@ -698,7 +713,7 @@ def test_load_local_creates_table_and_accumulates(staging, capsys):
     pgserver = pytest.importorskip("pgserver")
     import psycopg
 
-    (staging / "cccccccccccc" / "triage.json").write_text(json.dumps({**GOOD_TRIAGE, "relevance": "low"}),
+    (staging / "cccccccccccc" / "triage.json").write_text(json.dumps(GOOD_TRIAGE),
                                                            encoding="utf-8")
     (staging / "aaaaaaaaaaaa" / "text.txt").write_text(REPORT_TEXT, encoding="utf-8")
     argv = ["--staging", str(staging), "load", "--local"]
