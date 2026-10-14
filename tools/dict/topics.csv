@@ -1,11 +1,10 @@
 # 주제 사전: 문단에 키워드 중 하나가 나오면 그 주제를 붙인다. 키워드는 | 로 구분하고 여러 단어는 구절 그대로 찾는다.
-# 4자 이상은 대소문자 무시, 3자 이하(AI·EV·GPU)는 대소문자까지 같아야 한다. 단어 단위라 복수형(GPUs)은 따로 적는다. 한글은 글자 그대로 찾는다.
-# 주의: EV 는 밸류에이션 표기 EV/EBITDA 에도 걸린다. 오태깅이 보이면 EV 를 지우고 EVs·electric vehicle 로 찾는다.
+# 4자 이상은 대소문자 무시, 3자 이하(AI·GPU·HBM)는 대소문자까지 같아야 한다. 단어 단위라 복수형(GPUs)은 따로 적는다. 한글은 글자 그대로 찾는다.
 topic,keywords
 ai,AI|GPU|GPUs|HBM|HBM3E|HBM4|data center|data centers|datacenter|inference|LLM|LLMs|accelerator|accelerators|hyperscaler|hyperscalers|AI PC|on-device AI|인공지능
-smartphone,smartphone|smartphones|handset|handsets|iPhone|iPhones|Galaxy S|Galaxy Z|Galaxy S25|Galaxy S26|foldable|foldables|Pixel|Snapdragon|Dimensity|Exynos|mobile phone|스마트폰|폴더블|휴대폰
-auto,automotive|EV|EVs|electric vehicle|electric vehicles|ADAS|autonomous|self-driving|in-vehicle|OEM automaker|automaker|automakers|carmaker|carmakers|lidar|robotaxi|전장|자동차|전기차|자율주행
-smartwatch,smartwatch|smartwatches|Apple Watch|Galaxy Watch|Pixel Watch|Watch Ultra|wearable|wearables|Wear OS|watchOS|스마트워치|웨어러블|애플워치|갤럭시워치
+smartphone,smartphone|smartphones|handset|handsets|iPhone|iPhones|Galaxy S|Galaxy Z|Galaxy S25|Galaxy S26|foldable|foldables|Google Pixel|Pixel 9|Pixel 10|Snapdragon|Dimensity|Exynos|mobile phone|스마트폰|폴더블|휴대폰
+auto,automotive|EVs|electric vehicle|electric vehicles|ADAS|autonomous|self-driving|in-vehicle|OEM automaker|automaker|automakers|carmaker|carmakers|lidar|robotaxi|전장|자동차|전기차|자율주행
+smartwatch,smartwatch|smartwatches|Apple Watch|Galaxy Watch|Pixel Watch|Google Pixel Watch|Watch Ultra|wearable|wearables|Wear OS|watchOS|스마트워치|웨어러블|애플워치|갤럭시워치
 smartglass,smart glasses|smartglasses|AR glasses|AI glasses|XR|VR|Vision Pro|Ray-Ban Meta|Quest|headset|headsets|mixed reality|augmented reality|virtual reality|스마트글라스|스마트 글라스
 tablet,tablet|tablets|iPad|iPads|Galaxy Tab|MatePad|Xiaomi Pad|Lenovo Tab|태블릿|아이패드
 humanoid,humanoid|humanoids|robot|robots|robotics|actuator|actuators|Optimus|Figure 02|reducer|reducers|harmonic drive|dexterous hand|embodied AI|휴머노이드|로봇|액추에이터|감속기

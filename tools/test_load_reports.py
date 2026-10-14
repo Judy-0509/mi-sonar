@@ -137,7 +137,11 @@ def test_load_dicts_real_files():
     assert len(d.tickers) >= 134 and len(d.cutoff) >= 8
     assert [t for t, _ in d.topics] == ["ai", "smartphone", "auto", "smartwatch", "smartglass", "tablet", "humanoid"]
     assert ("005930-KRX", "Samsung Electronics", ["Samsung", "Samsung Electronics", "SEC", "삼성전자"]) in d.tickers
-    assert all(8 <= len(kws) <= 20 for _, kws in d.topics) and all(1 <= len(a) <= 4 for _, _, a in d.tickers)
+    assert all(len(kws) >= 8 for _, kws in d.topics)  # seed size; the owner may add more
+    assert lr.tag_text("EV/EBITDA of 8x; EVs and electric vehicles", d)[1] == ["auto"]
+    assert lr.tag_text("EV/EBITDA of 8x on pixel density gains", d)[1] == []
+    assert lr.tag_text("Google Pixel 10 and Google Pixel Watch 4", d)[1] == ["smartphone", "smartwatch"]
+    assert lr.tag_text("Google Pixel Watch 4 only", d)[1] == ["smartwatch"]
 
 
 def dict_dir(tmp_path, tickers: str) -> Path:

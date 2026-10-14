@@ -77,7 +77,7 @@ SQL은 큰따옴표로 감싸고, SQL 안의 문자열 리터럴은 작은따옴
      `WITH a AS (SELECT DISTINCT ON (period, country, vendor) period, country, vendor, sell_in_mu FROM sales_team.smartwatch_market_data WHERE dataset = 'actual' AND period = '2026Q3' ORDER BY period, country, vendor, published_month DESC), t AS (SELECT DISTINCT ON (period, vendor) period, vendor, sell_in_mu FROM sales_team.smartwatch_market_data WHERE dataset = 'our_tam' AND period = '2026Q3' ORDER BY period, vendor, published_month DESC) SELECT t.vendor, SUM(a.sell_in_mu) AS actual_mu, t.sell_in_mu AS tam_mu, SUM(a.sell_in_mu) - t.sell_in_mu AS diff_mu, ROUND(100.0 * (SUM(a.sell_in_mu) - t.sell_in_mu) / NULLIF(t.sell_in_mu, 0), 1) AS diff_pct FROM t JOIN a ON a.vendor = t.vendor GROUP BY t.vendor, t.sell_in_mu ORDER BY t.vendor`
    - (나) 연간 전망(`dataset = 'forecast'`)의 직전 발행월 대비 업체별 변화: `${CLAUDE_SKILL_DIR}/sources/smartwatch.md` 의 "두 발행월 비교" 패턴에서 `dataset = 'forecast'`, `period` 를 연도로 바꿔 쓴다.
 3. **미갱신 분기**: 숫자는 바꾸지 않는다.
-   - (가) `reports` 소스에서 직전 점검 이후 `firm = 'TechInsights' AND report_type = 'firm_analysis'` 기사와 `topics ILIKE '%스마트워치%'` 증권사 레포트를 찾아 요약과 핵심 숫자를 인용한다 (레포트 찾기 규칙 그대로).
+   - (가) `reports` 소스에서 직전 점검 이후 `firm = 'TechInsights' AND report_type = 'firm_analysis'` 기사와 `topics LIKE '%smartwatch%'` 증권사 레포트를 찾아 요약과 핵심 숫자를 인용한다 (레포트 찾기 규칙 그대로).
      증권사 레포트는 참고 수준이다. 사용자가 업체명을 지정하면 그 업체만 `scope LIKE '%<티커>%'`(티커는 `${CLAUDE_SKILL_DIR}/../../tools/dict/tickers.csv` 에서 업체명·별칭으로 찾는다, 예: Apple → `AAPL-USQ`) 또는 `keywords ILIKE` 로 검색해 있으면 인용하고, 없으면 "해당 없음" 한 줄.
      TAM 변경 근거는 TechInsights 실적·전망이 우선이다.
    - (나) 사용자가 외부 보도자료(Counterpoint Insights, Omdia PR, IDC 헤드라인)를 붙여주면 **증감 방향과 이유만** 메모한다. 집계 범위가 달라 TechInsights 숫자와 섞지 않는다.
