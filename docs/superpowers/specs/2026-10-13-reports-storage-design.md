@@ -104,7 +104,7 @@ PDF에서 뽑은 글자를 읽기 좋은 본문으로 만드는 규칙입니다.
 
 | 단계 | 누가 | 무엇 | 결과물 |
 |---|---|---|---|
-| 1. `extract` | 프로그램 | 파일명 해석, PDF 지문(sha256), 텍스트 추출(pdfplumber, 없으면 pypdf), 4절 정리, 참고 신호 계산(스마트폰 단어 수, URL 수) | `staging/<id>/text.txt`, `meta.json` |
+| 1. `extract` | 프로그램 | 파일명 해석, PDF 지문(sha256), 텍스트 추출(pymupdf, 없으면 pdfplumber, 그다음 pypdf), 4절 정리, 참고 신호 계산(스마트폰 단어 수, URL 수) | `staging/<id>/text.txt`, `meta.json` |
 | 2. triage (분류) | 에이전트 | `text.txt` 전체를 읽고 종류·관련도·이유를 기록 | `staging/<id>/triage.json` |
 | | 프로그램 | 결정 규칙 적용, 사용자 검토용 표 작성 (`triage-report`) | `staging/triage.md` |
 | 3. annotate (주석) | 에이전트 | 적재 대상만: 제목·요약·키워드·주제·핵심 숫자 등을 기록 | `staging/<id>/annotate.json` |

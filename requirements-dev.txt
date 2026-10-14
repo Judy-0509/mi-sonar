@@ -2,5 +2,6 @@
 pytest>=8
 Pillow>=10
 pgserver>=0.1.4
+pymupdf>=1.24,<2
 pdfplumber>=0.11,<1
 pypdf>=4,<7

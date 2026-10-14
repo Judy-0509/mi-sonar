@@ -26,6 +26,7 @@ from urllib.parse import unquote, urlparse
 ROOT = Path(__file__).resolve().parent.parent
 STAGING = ROOT / "staging"
 TABLE = "sales_team.nasdaq_report_doc"
+PARA_TABLE = "sales_team.nasdaq_report_para"
 MINIO_ENV = "MI_MINIO_WRITE"
 DICT_DIR = Path(__file__).resolve().parent / "dict"
 DOC_SHARE = 0.2  # a tag is document-level when it is in >= 20% of the paragraphs (or in the title)
@@ -324,7 +325,14 @@ def write_json(path: Path, data: dict) -> None:
 
 
 def read_pages(pdf: Path) -> tuple[list[str], str]:
-    """Page texts via pdfplumber, else pypdf (lazy imports). Returns (pages, extractor name)."""
+    """Page texts via pymupdf, else pdfplumber, else pypdf (lazy imports). Returns (pages, extractor name)."""
+    for name in ("pymupdf", "fitz"):  # fitz: pymupdf's import name before 1.24
+        try:
+            mupdf = importlib.import_module(name)
+        except ImportError:
+            continue
+        with mupdf.open(str(pdf)) as doc:
+            return [p.get_text("text") for p in doc], "pymupdf"
     try:
         import pdfplumber
     except ImportError:
@@ -430,11 +438,9 @@ def cmd_extract(staging: Path, paths: list[Path], force: bool) -> int:
 KINDS = ("link_digest", "weekly_note", "company_update", "industry_deep_dive", "mgmt_meeting", "firm_analysis",
          "other")
 RELEVANCE = ("high", "medium", "low")
-TOPICS = ("스마트폰", "AP", "메모리", "카메라", "디스플레이", "모뎀", "파운드리", "OEM", "공급망", "거시", "스마트워치")
 TRIAGE_KEYS = {"kind", "relevance", "reason", "load"}
-ANNOTATE_KEYS = {"title", "ticker", "analyst", "thesis", "scope", "summary_ko", "summary_en", "keywords_ko",
-                 "keywords_en", "topics", "key_numbers"}
-SCOPE_RE = re.compile(r"market|vendor:[^,\s][^,\n]*|band:(high|mid|low)")
+ANNOTATE_KEYS = {"title", "ticker", "analyst", "thesis", "summary_ko", "summary_en", "keywords_ko", "keywords_en",
+                 "key_numbers"}  # scope (tickers) and topics are derived from tools/dict, not written by the agent
 
 
 def _line(v) -> bool:
@@ -480,10 +486,6 @@ def validate_annotate(a, meta: dict) -> list[str]:
     thesis = a.get("thesis")
     if not (_line(thesis) and 10 <= len(thesis) <= 300):
         errs.append("thesis 는 레포트의 주장을 담은 10~300자 한 줄 한국어 문장 (필수)")
-    scope = a.get("scope")
-    if not (isinstance(scope, list) and 1 <= len(scope) <= 6
-            and all(isinstance(x, str) and SCOPE_RE.fullmatch(x) for x in scope) and len(", ".join(scope)) <= 300):
-        errs.append("scope 는 market, vendor:<업체명>, band:<high|mid|low> 중 1~6개의 목록 (업체명에 쉼표 없이)")
     ko = a.get("summary_ko")
     if not (isinstance(ko, list) and 3 <= len(ko) <= 6 and all(_line(x) for x in ko)):
         errs.append("summary_ko 는 한 줄짜리 한국어 문장 3~6개의 목록")
@@ -497,17 +499,14 @@ def validate_annotate(a, meta: dict) -> list[str]:
     kws = [a.get("keywords_ko"), a.get("keywords_en")]
     if all(_words(k) for k in kws) and len(", ".join(kws[0] + kws[1])) > 500:
         errs.append("keywords_ko + keywords_en 합계가 500자를 넘습니다")
-    topics = a.get("topics")
-    if not (isinstance(topics, list) and topics and len(set(topics)) == len(topics)
-            and all(x in TOPICS for x in topics)):
-        errs.append(f"topics 는 다음 중 1개 이상 (중복 없이): {', '.join(TOPICS)}")
     if not isinstance(a.get("key_numbers"), str):
         errs.append("key_numbers 는 문자열 (숫자가 없으면 빈 문자열)")
     return errs
 
 
-def report_state(d: Path) -> dict:
-    """Everything known about one staging/<id>/ folder; JSON errors become validation errors."""
+def report_state(d: Path, dicts: Dicts) -> dict:
+    """Everything known about one staging/<id>/ folder; JSON errors become validation errors. Paragraph tags are
+    recomputed from text.txt with the current dictionaries, so a dictionary edit applies without re-extracting."""
     s = {"id": d.name, "dir": d, "meta": read_json(d / "meta.json"), "triage": None, "t_err": [],
          "load": None, "annotate": None, "a_err": []}
     try:
@@ -525,12 +524,18 @@ def report_state(d: Path) -> dict:
             s["a_err"] = [f"JSON 오류: {e}"]
         if s["annotate"] is not None:
             s["a_err"] = validate_annotate(s["annotate"], s["meta"])
+    text = d / "text.txt"
+    s["paras"] = tag_paragraphs(split_paragraphs(text.read_text(encoding="utf-8") if text.exists() else ""), dicts)
+    ann = s["annotate"] if isinstance(s["annotate"], dict) else {}
+    s["title"] = (ann.get("title") if isinstance(ann.get("title"), str) else None) or s["meta"]["title"]  # as build_row
+    s["derived"] = derive(s["paras"], s["title"], dicts)
     return s
 
 
 def all_states(staging: Path) -> list[dict]:
+    dicts = load_dicts()
     dirs = [d for d in staging.iterdir() if (d / "meta.json").exists()] if staging.exists() else []
-    return sorted((report_state(d) for d in dirs),
+    return sorted((report_state(d, dicts) for d in dirs),
                   key=lambda s: (s["meta"]["published_on"], s["meta"]["firm"], s["id"]))
 
 
@@ -547,8 +552,10 @@ def cmd_status(staging: Path) -> int:
             decision = ("load" if s["load"] else "skip") + ("*" if "load" in s["triage"] else "")
         annotate = _stage(s["annotate"], s["a_err"]) if s["load"] else "n/a"
         loaded = ",".join(m.get("loaded", {})) or "-"
+        dv = s["derived"]
         print(f"{s['id']} {m['published_on']} {m['firm']:<12} triage={_stage(s['triage'], s['t_err'])} "
-              f"decision={decision} annotate={annotate} loaded={loaded}  {m['title'] or '(제목 없음)'}")
+              f"decision={decision} annotate={annotate} loaded={loaded} tickers={','.join(dv['doc_tickers']) or '-'} "
+              f"topics={','.join(dv['doc_topics']) or '-'} paras={dv['paragraphs']}  {m['title'] or '(제목 없음)'}")
         for e in s["t_err"]:
             print(f"    ! triage.json: {e}")
         for e in s["a_err"]:
@@ -571,6 +578,33 @@ def md_table(cols: list[str], rows: list[tuple]) -> list[str]:
             *("| " + " | ".join(_cell(v) for v in r) + " |" for r in rows)]
 
 
+def cmd_paragraphs(staging: Path, rid: str) -> int:
+    """Verification view of one report: every paragraph with its tags, then the counts and document-level tags."""
+    ids = sorted(d.name for d in staging.iterdir()
+                 if d.name.startswith(rid) and (d / "meta.json").exists()) if staging.exists() else []
+    if len(ids) != 1:
+        raise LoaderError(f"id '{rid}' 로 시작하는 레포트가 " + (f"여러 개입니다: {', '.join(ids)}" if ids else "없습니다"))
+    s = report_state(staging / ids[0], load_dicts())
+    m, dv = s["meta"], s["derived"]
+
+    def counts(c: dict) -> str:
+        return ", ".join(f"{k} {v}" for k, v in c.items()) or "-"
+
+    rows = [(p["para_no"], p["page"], ", ".join(p["tickers"]), ", ".join(p["topics"]), p["text"][:100])
+            for p in s["paras"]]
+    print("\n".join([
+        f"# 문단 확인: {m['id']} {m['published_on']} {m['firm']} {s['title'] or '(제목 없음)'}", "",
+        *md_table(["#", "p.", "tickers", "topics", "text"], rows), "",
+        f"## 집계 (문단 {dv['paragraphs']}개)", "",
+        f"- 티커별 문단 수: {counts(dv['tickers'])}",
+        f"- 주제별 문단 수: {counts(dv['topics'])}",
+        f"- 문서 티커 (문단 {DOC_SHARE:.0%} 이상 또는 제목): {', '.join(dv['doc_tickers']) or '-'}",
+        f"- 문서 주제 (같은 기준): {', '.join(dv['doc_topics']) or '-'}",
+        f"- 꼬리 자른 제목: {m['cut_heading'] or '-'} / 남은 쪽: {m['body_pages']}/{m['pages']}",
+    ]))
+    return 0
+
+
 def cmd_triage_report(staging: Path) -> int:
     states = all_states(staging)
     groups: dict[str, list[dict]] = {"load": [], "skip": [], "todo": []}
@@ -588,9 +622,11 @@ def cmd_triage_report(staging: Path) -> int:
         "`triage-report` 를 다시 실행하세요 (결정 칸에 `(수동)` 표시).",
         "제외된 레포트는 DB와 MinIO 어디에도 올라가지 않고 이 파일에만 기록됩니다.",
     ]
-    cols = ["id", "발행일", "증권사", "티커", "제목", "종류", "관련도", "결정", "이유", "폰 단어/URL"]
+    cols = ["id", "발행일", "증권사", "티커", "제목", "티커(자동)", "주제(자동)", "종류", "관련도", "결정", "이유",
+            "폰 단어/URL"]
     for key, label in (("load", "적재"), ("skip", "제외")):
         rows = [(s["id"], s["meta"]["published_on"], s["meta"]["firm"], s["meta"]["ticker"], s["meta"]["title"],
+                 ", ".join(s["derived"]["doc_tickers"]), ", ".join(s["derived"]["doc_topics"]),
                  s["triage"]["kind"], s["triage"]["relevance"], label + (" (수동)" if "load" in s["triage"] else ""),
                  s["triage"]["reason"], f"{s['meta']['smartphone_hits']}/{s['meta']['url_count']}")
                 for s in groups[key]]
@@ -631,19 +667,41 @@ CREATE TABLE IF NOT EXISTS sales_team.nasdaq_report_doc (
   ticker VARCHAR(20),
   market VARCHAR(10)
 );
+CREATE TABLE IF NOT EXISTS sales_team.nasdaq_report_para (
+  id SERIAL PRIMARY KEY,
+  doc_id INTEGER NOT NULL REFERENCES sales_team.nasdaq_report_doc(id) ON DELETE CASCADE,
+  page INTEGER NOT NULL,
+  para_no INTEGER NOT NULL,
+  tickers VARCHAR(300),
+  topics VARCHAR(100),
+  text TEXT NOT NULL,
+  UNIQUE (doc_id, para_no)
+);
 """
 COLUMNS = ("firm", "published_on", "title", "report_type", "topics", "analyst", "pages", "minio_key",
            "file_sha256", "summary", "keywords", "key_numbers", "thesis", "scope", "body", "body_loaded", "ticker",
            "market")
 INSERT = (f"INSERT INTO {TABLE} ({', '.join(COLUMNS)}) "
-          f"VALUES ({', '.join(f'%({c})s' for c in COLUMNS)})")
+          f"VALUES ({', '.join(f'%({c})s' for c in COLUMNS)}) RETURNING id")
+PARA_INSERT = f"INSERT INTO {PARA_TABLE} (doc_id, page, para_no, tickers, topics, text) VALUES (%s, %s, %s, %s, %s, %s)"
 
 
 def slug(text: str) -> str:
     return re.sub(r"[^A-Za-z0-9]+", "_", text).strip("_")
 
 
-def build_row(meta: dict, triage: dict, ann: dict, body: str) -> dict:
+def join_fit(tags: list[str], limit: int) -> str | None:
+    """Comma-joined tags within a VARCHAR(limit); no tags -> NULL."""
+    # ponytail: tags past the column width are dropped (a comps table can name 30+ tickers); widen to TEXT if needed
+    out = ""
+    for t in tags:
+        if len(out) + 2 * bool(out) + len(t) > limit:
+            break
+        out += (", " if out else "") + t
+    return out or None
+
+
+def build_row(meta: dict, triage: dict, ann: dict, body: str, derived: dict) -> dict:
     title = ann.get("title") or meta["title"]
     name = "_".join(x for x in (meta["published_on"], slug(title)[:60].strip("_"), meta["id"][:6]) if x)
     return {
@@ -651,7 +709,7 @@ def build_row(meta: dict, triage: dict, ann: dict, body: str) -> dict:
         "published_on": date.fromisoformat(meta["published_on"]),
         "title": title,
         "report_type": triage["kind"],
-        "topics": ", ".join(ann["topics"]),
+        "topics": join_fit(derived["doc_topics"], 300),
         "analyst": ann.get("analyst"),
         "pages": meta["pages"],
         "minio_key": f"reports/{slug(meta['firm'])}/{name}{Path(meta['source_path']).suffix.lower()}",
@@ -660,7 +718,7 @@ def build_row(meta: dict, triage: dict, ann: dict, body: str) -> dict:
         "keywords": ", ".join(ann["keywords_ko"] + ann["keywords_en"]),
         "key_numbers": ann["key_numbers"] or None,
         "thesis": ann["thesis"],
-        "scope": ", ".join(ann["scope"]),
+        "scope": join_fit(derived["doc_tickers"], 300),
         "body": body,
         "body_loaded": True,
         "ticker": ann.get("ticker") or meta["ticker"],
@@ -694,8 +752,10 @@ def load_all(staging: Path, dsn: str, target: str, create: bool, minio_url: str)
                       prepare_threshold=None) as conn:  # no server-side prepare: safe behind PgBouncer transaction pooling
         if create:
             conn.execute(DDL)
-        elif conn.execute("SELECT to_regclass(%s)", (TABLE,)).fetchone()[0] is None:
-            raise LoaderError(f"{TABLE} 테이블이 아직 없습니다 (DBaaS 팀 생성 대기). 그동안은 --local 로 쌓으세요.", 1)
+        else:
+            for t in (TABLE, PARA_TABLE):
+                if conn.execute("SELECT to_regclass(%s)", (t,)).fetchone()[0] is None:
+                    raise LoaderError(f"{t} 테이블이 아직 없습니다 (DBaaS 팀 생성 대기). 그동안은 --local 로 쌓으세요.", 1)
         for s in all_states(staging):
             if not s["load"]:
                 continue
@@ -705,12 +765,16 @@ def load_all(staging: Path, dsn: str, target: str, create: bool, minio_url: str)
                 continue
             m = s["meta"]
             try:
-                row = build_row(m, s["triage"], s["annotate"], (s["dir"] / "text.txt").read_text(encoding="utf-8"))
+                row = build_row(m, s["triage"], s["annotate"], (s["dir"] / "text.txt").read_text(encoding="utf-8"),
+                                s["derived"])
                 with conn.transaction():  # one report = one transaction
                     if conn.execute(f"SELECT 1 FROM {TABLE} WHERE file_sha256 = %s", (m["file_sha256"],)).fetchone():
                         result = "exists"
                     else:
-                        conn.execute(INSERT, row)  # INSERT first: an upload failure raises and rolls the row back
+                        doc_id = conn.execute(INSERT, row).fetchone()[0]  # rows first: a failed upload rolls them back
+                        with conn.cursor() as cur:
+                            cur.executemany(PARA_INSERT, [(doc_id, p["page"], p["para_no"], join_fit(p["tickers"], 300),
+                                                           join_fit(p["topics"], 100), p["text"]) for p in s["paras"]])
                         if mc:
                             mc[0].fput_object(mc[1], row["minio_key"], m["source_path"], content_type=CONTENT_TYPES[Path(row["minio_key"]).suffix])
                         result = "loaded"
@@ -721,7 +785,7 @@ def load_all(staging: Path, dsn: str, target: str, create: bool, minio_url: str)
             counts[result] += 1
             m.setdefault("loaded", {})[target] = datetime.now().isoformat(timespec="seconds")
             write_json(s["dir"] / "meta.json", m)
-            print(f"{result:<6} {s['id']} {row['minio_key']}")
+            print(f"{result:<6} {s['id']} {row['minio_key']} paras={len(s['paras'])}")
     print(f"({target}: 적재 {counts['loaded']}, 이미 있음 {counts['exists']}, 주석 대기 {counts['wait']}, "
           f"실패 {counts['fail']}, MinIO {'업로드' if mc else '건너뜀'})")
     return 1 if counts["wait"] or counts["fail"] else 0
@@ -768,6 +832,8 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--force", action="store_true", help="이미 추출된 것도 다시 추출")
     sub.add_parser("status", help="레포트별 단계 상태 한 줄씩")
     sub.add_parser("triage-report", help="staging/triage.md 생성")
+    s = sub.add_parser("paragraphs", help="한 레포트의 문단별 자동 티커·주제와 집계 (검증용)")
+    s.add_argument("id", help="staging/<id> 폴더 이름 또는 그 앞부분")
     s = sub.add_parser("load", help="적재 대상을 DB(+MinIO)에 넣기")
     g = s.add_mutually_exclusive_group(required=True)
     g.add_argument("--local", action="store_true", help="staging/localpg 내장 PostgreSQL (MinIO 안 씀)")
@@ -779,6 +845,8 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_status(a.staging)
         if a.cmd == "triage-report":
             return cmd_triage_report(a.staging)
+        if a.cmd == "paragraphs":
+            return cmd_paragraphs(a.staging, a.id)
         if a.cmd == "load":
             return cmd_load(a.staging, a.local, a.dsn_env, a.no_minio)
         return cmd_extract(a.staging, a.paths, a.force)

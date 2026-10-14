@@ -274,12 +274,44 @@ def pdf_dir(tmp_path):
     return d
 
 
-@pytest.fixture(params=["pdfplumber", "pypdf"])
+TRIED_FIRST = {"pymupdf": [], "pdfplumber": ["pymupdf", "fitz"], "pypdf": ["pymupdf", "fitz", "pdfplumber"]}
+
+
+@pytest.fixture(params=list(TRIED_FIRST))
 def extractor(request, monkeypatch):
     pytest.importorskip(request.param)
-    if request.param == "pypdf":
-        monkeypatch.setitem(sys.modules, "pdfplumber", None)  # import pdfplumber -> ImportError
+    for name in TRIED_FIRST[request.param]:  # import X -> ImportError, so read_pages falls through to the next one
+        monkeypatch.setitem(sys.modules, name, None)
     return request.param
+
+
+class FakeDoc(list):
+    """Stand-in for a pymupdf Document: iterable pages, usable in `with`."""
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+class FakePage:
+    def __init__(self, text):
+        self.text = text
+
+    def get_text(self, kind):
+        assert kind == "text"
+        return self.text
+
+
+def test_read_pages_prefers_pymupdf_then_legacy_fitz(tmp_path, monkeypatch):
+    import types
+
+    fake = types.SimpleNamespace(open=lambda path: FakeDoc([FakePage("page one\n"), FakePage("page two\n")]))
+    monkeypatch.setitem(sys.modules, "pymupdf", fake)
+    assert lr.read_pages(tmp_path / "x.pdf") == (["page one\n", "page two\n"], "pymupdf")
+    monkeypatch.setitem(sys.modules, "pymupdf", None)  # before 1.24 the module was only importable as fitz
+    monkeypatch.setitem(sys.modules, "fitz", fake)
+    assert lr.read_pages(tmp_path / "x.pdf") == (["page one\n", "page two\n"], "pymupdf")
 
 
 def test_extract_writes_staging_and_is_idempotent(pdf_dir, tmp_path, extractor, capsys):
@@ -312,8 +344,8 @@ def test_extract_bad_name_fails_but_continues(pdf_dir, tmp_path, capsys):
 
 
 def test_extract_without_any_pdf_library(pdf_dir, tmp_path, monkeypatch, capsys):
-    monkeypatch.setitem(sys.modules, "pdfplumber", None)
-    monkeypatch.setitem(sys.modules, "pypdf", None)
+    for name in ("pymupdf", "fitz", "pdfplumber", "pypdf"):
+        monkeypatch.setitem(sys.modules, name, None)
     assert lr.main(["--staging", str(tmp_path / "st"), "extract", str(pdf_dir)]) == 2
     assert "requirements-dev.txt" in capsys.readouterr().err
 
@@ -387,7 +419,8 @@ def test_extract_mixed_folder_and_minio_extension(pdf_dir, tmp_path, capsys):
     assert "(파일 2개" in capsys.readouterr().out
     meta = next(m for m in (json.loads(f.read_text(encoding="utf-8")) for f in st.glob("*/meta.json"))
                 if m["extractor"] == "text")
-    assert lr.build_row(meta, {**GOOD_TRIAGE, "kind": "firm_analysis"}, GOOD_ANNOTATE, "b")["minio_key"].endswith(".md")
+    assert lr.build_row(meta, {**GOOD_TRIAGE, "kind": "firm_analysis"}, GOOD_ANNOTATE, "b",
+                        NO_TAGS)["minio_key"].endswith(".md")
 
 
 # ---------- triage / annotate / status ----------
@@ -397,15 +430,17 @@ GOOD_ANNOTATE = {
     "title": "Micron Technology: Mgmt Meeting, CY27 and CY28 Both Significantly Tight",
     "analyst": "Jane Doe",
     "thesis": "메모리 공급 부족이 2028년까지 이어져 스마트폰 DRAM 가격이 오른다.",
-    "scope": ["market", "vendor:Apple"],
     "summary_ko": ["메모리 공급 부족이 2028년까지 이어진다.", "HBM 수요가 2027년까지 공급을 웃돈다 [p.2].",
                    "모바일 DRAM 탑재량이 늘어난다 [p.3]."],
     "summary_en": "Management sees tight memory supply through CY28.",
     "keywords_ko": ["HBM", "모바일 DRAM"],
     "keywords_en": ["HBM", "mobile DRAM", "LPDDR5X"],
-    "topics": ["메모리", "스마트폰"],
     "key_numbers": "CY27 DRAM bit growth 18%",
 }
+NO_TAGS = {"doc_tickers": [], "doc_topics": []}
+REPORT_TEXT = ("[p.1]\nApple will raise iPhone builds as smartphone demand recovers.\n"
+               "Samsung Electronics and Apple both expand foldable lines.\nSource: company data\n"
+               "[p.2]\nHBM supply for AI servers stays tight through 2027.\n")
 META = {"id": "a1b2c3d4e5f6", "file_sha256": "a1b2c3d4e5f6" + "0" * 52, "source_path": "x.pdf",
         "published_on": "2026-10-06", "ticker": "MU", "market": "USQ", "firm": "JPMorgan",
         "title": "Micron Technology Mgmt Mtg", "pages": 13, "body_pages": 7, "cut_heading": None,
@@ -439,8 +474,6 @@ def test_decide(kind, relevance, load, expect):
 
 def test_validate_annotate_ok_and_title_rule():
     assert lr.validate_annotate(GOOD_ANNOTATE, META) == []
-    assert lr.validate_annotate({**GOOD_ANNOTATE, "topics": ["스마트워치"]}, META) == []
-    assert lr.validate_annotate({**GOOD_ANNOTATE, "scope": ["band:low", "vendor:Samsung Electronics"]}, META) == []
     assert lr.validate_annotate({**GOOD_ANNOTATE, "summary_ko": ["주장."] + ["근거 [p.1]"] * 5}, META) == []
     assert lr.validate_triage({**GOOD_TRIAGE, "kind": "firm_analysis"}) == []
     no_title = {k: v for k, v in GOOD_ANNOTATE.items() if k != "title"}
@@ -453,8 +486,8 @@ def test_validate_annotate_ok_and_title_rule():
     ({"summary_en": ""}, "summary_en"),
     ({"keywords_ko": [f"k{i}" for i in range(11)]}, "keywords_ko"),
     ({"keywords_en": ["a, b"]}, "keywords_en"),
-    ({"topics": ["스마트폰", "반도체"]}, "topics"),
-    ({"topics": []}, "topics"),
+    ({"topics": ["스마트폰"]}, "모르는 키: topics"),
+    ({"scope": ["market"]}, "모르는 키: scope"),
     ({"ticker": "X" * 21}, "ticker"),
     ({"key_numbers": None}, "key_numbers"),
     ({"summary": "x"}, "모르는 키"),
@@ -462,29 +495,22 @@ def test_validate_annotate_ok_and_title_rule():
     ({"summary_ko": ["주장.", "페이지 표시 없는 근거", "근거 [p.2]"]}, "[p.N]"),
     ({"thesis": "짧은 주장"}, "thesis"),
     ({"thesis": "첫 줄\n둘째 줄 주장입니다"}, "thesis"),
-    ({"scope": ["vendors:Apple"]}, "scope"),
-    ({"scope": ["band:premium"]}, "scope"),
-    ({"scope": ["vendor:A, B"]}, "scope"),
-    ({"scope": []}, "scope"),
-    ({"scope": ["market"] * 7}, "scope"),
-    ({"scope": "market"}, "scope"),
 ])
 def test_validate_annotate_errors(patch, word):
     errs = lr.validate_annotate({**GOOD_ANNOTATE, **patch}, META)
     assert any(word in e for e in errs), errs
 
 
-def test_validate_annotate_requires_thesis_and_scope():
-    for key in ("thesis", "scope"):
-        errs = lr.validate_annotate({k: v for k, v in GOOD_ANNOTATE.items() if k != key}, META)
-        assert any(key in e for e in errs), errs
+def test_validate_annotate_requires_thesis():
+    errs = lr.validate_annotate({k: v for k, v in GOOD_ANNOTATE.items() if k != "thesis"}, META)
+    assert any("thesis" in e for e in errs), errs
 
 
-def write_report(st: Path, rid: str, triage=None, annotate=None, **meta) -> Path:
+def write_report(st: Path, rid: str, triage=None, annotate=None, text=None, **meta) -> Path:
     d = st / rid
     d.mkdir(parents=True)
     lr.write_json(d / "meta.json", {**META, "id": rid, "file_sha256": rid + "0" * 52, **meta})
-    (d / "text.txt").write_text(f"[p.1]\nBody of {rid}.\n", encoding="utf-8")
+    (d / "text.txt").write_text(text or f"[p.1]\nBody of {rid}.\n", encoding="utf-8")
     if triage is not None:
         (d / "triage.json").write_text(triage if isinstance(triage, str) else json.dumps(triage), encoding="utf-8")
     if annotate is not None:
@@ -508,7 +534,7 @@ def test_status_lines(staging, capsys):
     lines = capsys.readouterr().out.splitlines()
     assert lines[0].startswith("eeeeeeeeeeee 2026-01-01")  # sorted by date
     by_id = {ln[:12]: ln for ln in lines}
-    assert "triage=ok decision=load annotate=ok loaded=-" in by_id["aaaaaaaaaaaa"]
+    assert "triage=ok decision=load annotate=ok loaded=- tickers=MU-USQ topics=- paras=1  " in by_id["aaaaaaaaaaaa"]
     assert "decision=skip annotate=n/a" in by_id["bbbbbbbbbbbb"]
     assert "decision=load* annotate=-" in by_id["cccccccccccc"]
     assert "triage=ERR" in by_id["dddddddddddd"]
@@ -521,17 +547,48 @@ def test_triage_report(staging, capsys):
     md = (staging / "triage.md").read_text(encoding="utf-8")
     assert "## 적재 (2)" in md and "## 제외 (1)" in md and "## 미분류·오류 (2)" in md
     assert "서버 전용" in md and "적재 (수동)" in md and "triage.json 없음" in md
+    assert "| 제목 | 티커(자동) | 주제(자동) | 종류 |" in md
+    assert "| Micron Technology Mgmt Mtg | MU-USQ |  | company_update |" in md
     assert "적재 2" in capsys.readouterr().out
+
+
+def test_paragraphs_view_and_id_prefix(tmp_path, capsys):
+    st = tmp_path / "staging"
+    write_report(st, "abc123456789", GOOD_TRIAGE, GOOD_ANNOTATE, text=REPORT_TEXT, cut_heading="Analyst Certification")
+    write_report(st, "abd123456789")
+    assert lr.main(["--staging", str(st), "paragraphs", "abc1"]) == 0
+    out = capsys.readouterr().out
+    assert "| # | p. | tickers | topics | text |" in out
+    assert "| 1 | 1 | AAPL-USQ | smartphone | Apple will raise iPhone builds" in out
+    assert ("| 2 | 1 | 005930-KRX, AAPL-USQ | smartphone | Samsung Electronics and Apple both expand foldable lines. "
+            "Source: company data |") in out
+    assert "| 3 | 2 |  | ai | HBM supply" in out
+    assert "티커별 문단 수: AAPL-USQ 2, 005930-KRX 1" in out and "주제별 문단 수: smartphone 2, ai 1" in out
+    assert "): AAPL-USQ, 005930-KRX, MU-USQ" in out  # MU-USQ from the title only
+    assert "Analyst Certification" in out and "7/13" in out
+    long = "x" * 150 + "."
+    write_report(st, "fff000000000", text=f"[p.1]\n{long}\n")
+    lr.main(["--staging", str(st), "paragraphs", "fff"])
+    assert "x" * 100 + " |" in capsys.readouterr().out
+    assert lr.main(["--staging", str(st), "paragraphs", "ab"]) == 1
+    err = capsys.readouterr().err
+    assert "abc123456789" in err and "abd123456789" in err
+    assert lr.main(["--staging", str(st), "paragraphs", "zzz"]) == 1
+    assert "zzz" in capsys.readouterr().err
 
 
 # ---------- load ----------
 
 def test_build_row_joins_fields():
-    row = lr.build_row(META, GOOD_TRIAGE, GOOD_ANNOTATE, "[p.1]\nbody\n")
+    derived = {"doc_tickers": ["AAPL-USQ", "MU-USQ"], "doc_topics": ["smartphone", "ai"]}
+    row = lr.build_row(META, GOOD_TRIAGE, GOOD_ANNOTATE, "[p.1]\nbody\n", derived)
     assert row["summary"] == "\n".join(GOOD_ANNOTATE["summary_ko"]) + "\n" + GOOD_ANNOTATE["summary_en"]
     assert row["keywords"] == "HBM, 모바일 DRAM, HBM, mobile DRAM, LPDDR5X"
-    assert row["topics"] == "메모리, 스마트폰" and row["report_type"] == "company_update"
-    assert (row["thesis"], row["scope"]) == (GOOD_ANNOTATE["thesis"], "market, vendor:Apple")
+    assert row["topics"] == "smartphone, ai" and row["report_type"] == "company_update"
+    assert (row["thesis"], row["scope"]) == (GOOD_ANNOTATE["thesis"], "AAPL-USQ, MU-USQ")
+    many = [f"T{i:03d}-USQ" for i in range(40)]  # a comps table: 40 x 10 chars > VARCHAR(300)
+    row = lr.build_row(META, GOOD_TRIAGE, GOOD_ANNOTATE, "b", {"doc_tickers": many, "doc_topics": []})
+    assert (row["scope"], row["topics"]) == (", ".join(many[:30]), None)
     assert row["minio_key"] == ("reports/JPMorgan/2026-10-06_Micron_Technology_Mgmt_Meeting_CY27_and_CY28_"
                                 "Both_Significan_a1b2c3.pdf")
     assert (row["ticker"], row["market"], row["body_loaded"]) == ("MU", "USQ", True)
@@ -600,8 +657,10 @@ def test_load_dsn_env_uploads_once_and_skips_existing(srv, staging, monkeypatch,
     assert "exists aaaaaaaaaaaa" in capsys.readouterr().out and len(fake.put) == 1
     with psycopg.connect(srv.get_uri()) as c:
         rows = c.execute(f"SELECT firm, title, keywords, body, body_loaded FROM {lr.TABLE}").fetchall()
+        paras = c.execute(f"SELECT page, para_no, text FROM {lr.PARA_TABLE}").fetchall()
     assert rows == [("JPMorgan", GOOD_ANNOTATE["title"], "HBM, 모바일 DRAM, HBM, mobile DRAM, LPDDR5X",
                      "[p.1]\nBody of aaaaaaaaaaaa.\n", True)]
+    assert paras == [(1, 1, "Body of aaaaaaaaaaaa.")]
 
 
 def test_load_dsn_env_refuses_missing_table(srv, staging, monkeypatch, capsys):
@@ -615,21 +674,45 @@ def test_load_dsn_env_refuses_missing_table(srv, staging, monkeypatch, capsys):
         assert c.execute("SELECT to_regnamespace('sales_team')").fetchone()[0] is None
 
 
+def test_load_dsn_env_refuses_missing_para_table(srv, staging, monkeypatch, capsys):
+    import psycopg
+
+    with psycopg.connect(srv.get_uri(), autocommit=True) as c:
+        c.execute("CREATE DATABASE doc_only_db")
+    with psycopg.connect(srv.get_uri("doc_only_db"), autocommit=True) as c:
+        c.execute(lr.DDL)
+        c.execute(f"DROP TABLE {lr.PARA_TABLE}")  # the DBaaS team created only the doc table
+    monkeypatch.setenv("MI_DB_REPORTS_WRITE", srv.get_uri("doc_only_db"))
+    assert lr.main(["--staging", str(staging), "load", "--dsn-env", "MI_DB_REPORTS_WRITE", "--no-minio"]) == 1
+    err = capsys.readouterr().err
+    assert "nasdaq_report_para" in err and "DBaaS" in err
+    with psycopg.connect(srv.get_uri("doc_only_db")) as c:
+        assert c.execute(f"SELECT count(*) FROM {lr.TABLE}").fetchone()[0] == 0
+
+
 def test_load_local_creates_table_and_accumulates(staging, capsys):
     pgserver = pytest.importorskip("pgserver")
     import psycopg
 
     (staging / "cccccccccccc" / "triage.json").write_text(json.dumps({**GOOD_TRIAGE, "relevance": "low"}),
                                                            encoding="utf-8")
+    (staging / "aaaaaaaaaaaa" / "text.txt").write_text(REPORT_TEXT, encoding="utf-8")
     argv = ["--staging", str(staging), "load", "--local"]
     assert lr.main(argv) == 0
-    assert "MinIO 건너뜀" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "MinIO 건너뜀" in out and "paras=3" in out
     assert lr.main(argv) == 0
     assert "exists aaaaaaaaaaaa" in capsys.readouterr().out
     with pgserver.get_server(staging / "localpg") as s, psycopg.connect(s.get_uri()) as c:
         assert c.execute(f"SELECT count(*) FROM {lr.TABLE}").fetchone()[0] == 1
-        assert c.execute(f"SELECT thesis, scope FROM {lr.TABLE}").fetchall() == [
-            (GOOD_ANNOTATE["thesis"], "market, vendor:Apple")]
+        doc_id, thesis, topics, scope = c.execute(f"SELECT id, thesis, topics, scope FROM {lr.TABLE}").fetchone()
+        assert (thesis, topics, scope) == (GOOD_ANNOTATE["thesis"], "smartphone, ai", "AAPL-USQ, 005930-KRX, MU-USQ")
+        paras = c.execute(f"SELECT doc_id, page, para_no, tickers, topics, text FROM {lr.PARA_TABLE} "
+                          "ORDER BY para_no").fetchall()  # after the second run: still 3 rows
+    assert [p[:5] for p in paras] == [(doc_id, 1, 1, "AAPL-USQ", "smartphone"),
+                                      (doc_id, 1, 2, "005930-KRX, AAPL-USQ", "smartphone"),
+                                      (doc_id, 2, 3, None, "ai")]
+    assert paras[1][5].endswith("foldable lines. Source: company data")
 
 
 # ---------- fix wave ----------
@@ -702,6 +785,7 @@ def test_failed_upload_rolls_back_row(srv, staging, monkeypatch, capsys):
     assert "FAIL aaaaaaaaaaaa" in capsys.readouterr().out
     with psycopg.connect(srv.get_uri("m1_db")) as c:
         assert c.execute(f"SELECT count(*) FROM {lr.TABLE}").fetchone()[0] == 0
+        assert c.execute(f"SELECT count(*) FROM {lr.PARA_TABLE}").fetchone()[0] == 0
 
 
 def test_triage_json_with_bom_is_read(tmp_path, capsys):

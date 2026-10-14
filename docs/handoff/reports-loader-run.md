@@ -31,9 +31,12 @@ judgements and write them into two small JSON files per report. You never write 
 
 ```powershell
 python --version                       # 3.10 or newer
-pip install -r requirements-dev.txt    # pdfplumber, pypdf, pgserver, pytest
+pip install -r requirements-dev.txt    # pymupdf, pdfplumber, pypdf, pgserver, pytest
 python -m pytest -q                    # all pass before you start
 ```
+
+pymupdf is the preferred PDF extractor; `extract` falls back to pdfplumber, then pypdf, and `meta.json` records which
+one ran (`extractor`). If pymupdf is missing, install it on its own: `pip install pymupdf`.
 
 ## 1. Extract
 
